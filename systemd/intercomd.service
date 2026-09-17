@@ -1,0 +1,32 @@
+[Unit]
+Description=icom2000 home intercom daemon
+After=multi-user.target sound.target
+Wants=sound.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/intercomd --socket %t/icom2000/control.sock
+Restart=on-failure
+RestartSec=2
+
+# Runs as a dedicated user, not root: GPIO and audio device access comes
+# from group membership (see udev/99-icom2000-gpio.rules), not privilege.
+User=icom2000
+Group=icom2000
+SupplementaryGroups=gpio audio
+
+# %t/icom2000 -> /run/icom2000 (0770, owned by User=/Group= above), created
+# for us before ExecStart runs. This is NOT intercomctl's compiled-in
+# default socket path (/run/icom2000.sock) -- either run intercomctl as
+# `intercomctl -s /run/icom2000/control.sock ...`, or
+# `export ICOM2000_SOCKET=/run/icom2000/control.sock` for interactive use.
+RuntimeDirectory=icom2000
+RuntimeDirectoryMode=0770
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

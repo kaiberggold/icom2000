@@ -1,0 +1,9 @@
+# Raspberry Pi OS's own udev rules already chgrp gpiochip devices to
+# "gpio" on boot; this rule just documents/pins that dependency for
+# intercomd, which runs as an unprivileged user in the "gpio" group
+# (see systemd/intercomd.service) rather than as root.
+#
+# Install: sudo cp udev/99-icom2000-gpio.rules /etc/udev/rules.d/
+#          sudo udevadm control --reload-rules && sudo udevadm trigger
+
+SUBSYSTEM=="gpio", KERNEL=="gpiochip*", GROUP="gpio", MODE="0660"
