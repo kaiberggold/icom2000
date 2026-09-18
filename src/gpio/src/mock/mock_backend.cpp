@@ -77,17 +77,19 @@ private:
     std::deque<std::pair<Level, std::chrono::steady_clock::time_point>> pending_events_;
 };
 
+core::Logger& kLog = core::get_logger("gpio.mock");
+
 } // namespace
 
 std::unique_ptr<OutputPin> MockBackend::request_output(const PinConfig& config, Level initial) {
-    core::log_debug("mock gpio: requesting output " + config.chip + ":" + std::to_string(config.line) +
-                     " (" + config.consumer + ")");
+    kLog.debug("requesting output " + config.chip + ":" + std::to_string(config.line) + " (" +
+               config.consumer + ")");
     return std::make_unique<MockOutputPin>(config, initial);
 }
 
 std::unique_ptr<InputPin> MockBackend::request_input(const PinConfig& config, Edge /*edge*/) {
-    core::log_debug("mock gpio: requesting input " + config.chip + ":" + std::to_string(config.line) +
-                     " (" + config.consumer + ")");
+    kLog.debug("requesting input " + config.chip + ":" + std::to_string(config.line) + " (" +
+               config.consumer + ")");
     return std::make_unique<MockInputPin>(config);
 }
 

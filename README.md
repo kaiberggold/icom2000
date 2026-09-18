@@ -35,6 +35,11 @@ Run it locally:
 ./build/host-dev/src/cli/intercomctl -s /tmp/icom2000.sock bell ring 300
 ```
 
+Logs go to syslog (`journalctl -t icom2000` under systemd), per component
+and level-filterable: `intercomd --log-level "warn,gpio.mock=debug"` or the
+equivalent `ICOM_LOG` environment variable -- see
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) "Logging".
+
 ## Build for the Pi Zero
 
 ```sh

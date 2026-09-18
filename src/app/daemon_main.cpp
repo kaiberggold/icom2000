@@ -22,7 +22,6 @@
 #include <vector>
 
 using icom::core::EventLoop;
-using icom::core::LogLevel;
 using icom::core::SignalWatcher;
 using icom::gpio::Edge;
 using icom::gpio::Level;
@@ -46,6 +45,7 @@ std::string to_upper(std::string s) {
 struct Options {
     std::string socket_path = "/run/icom2000.sock";
     std::string gpio_chip = "gpiochip0";
+    std::string log_level_spec; // empty: leave whatever ICOM_LOG set (or the built-in default)
 };
 
 Options parse_args(int argc, char** argv) {
@@ -56,8 +56,14 @@ Options parse_args(int argc, char** argv) {
             opts.socket_path = argv[++i];
         } else if (arg == "--gpio-chip" && i + 1 < argc) {
             opts.gpio_chip = argv[++i];
+        } else if (arg == "--log-level" && i + 1 < argc) {
+            opts.log_level_spec = argv[++i];
         } else if (arg == "--help") {
-            std::cout << "usage: intercomd [--socket PATH] [--gpio-chip NAME]\n";
+            std::cout << "usage: intercomd [--socket PATH] [--gpio-chip NAME] [--log-level SPEC]\n"
+                       << "  SPEC: a default level and/or per-component overrides, e.g.\n"
+                       << "        \"warn,gpio.mock=debug,ipc.control_server=debug\"\n"
+                       << "        (also settable via the ICOM_LOG environment variable;\n"
+                       << "        --log-level takes precedence when both are given)\n";
             std::exit(0);
         }
     }
@@ -72,19 +78,36 @@ constexpr unsigned kRingModePinLine = 27;
 constexpr unsigned kPolarityPinLine = 22;
 constexpr unsigned kHookDetectPinLine = 23;
 
+icom::core::Logger& kLog = icom::core::get_logger("app");
+
 } // namespace
 
 int main(int argc, char** argv) {
-    icom::core::set_min_log_level(LogLevel::Debug);
+    icom::core::init_syslog("icom2000");
+
     const Options opts = parse_args(argc, argv);
 
-    icom::core::log_info("intercomd starting (socket=" + opts.socket_path +
-                          ", gpio-chip=" + opts.gpio_chip + ")");
+    // ICOM_LOG sets the baseline (e.g. from systemd's Environment=); a
+    // --log-level on the command line overrides it for one run without
+    // having to touch the unit file. Both go through the same parser, so
+    // both fail the same way -- loudly, before anything else starts up --
+    // on a typo rather than silently keeping whatever level components
+    // happened to default to.
+    if (!icom::core::configure_levels_from_env()) {
+        std::cerr << "intercomd: invalid ICOM_LOG value\n";
+        return 1;
+    }
+    if (!opts.log_level_spec.empty() && !icom::core::configure_levels(opts.log_level_spec)) {
+        std::cerr << "intercomd: invalid --log-level value: " << opts.log_level_spec << "\n";
+        return 1;
+    }
+
+    kLog.info("starting (socket=" + opts.socket_path + ", gpio-chip=" + opts.gpio_chip + ")");
 
     EventLoop loop;
 
     SignalWatcher signals(loop, {SIGINT, SIGTERM}, [&](int signo) {
-        icom::core::log_info("received signal " + std::to_string(signo) + ", shutting down");
+        kLog.info("received signal " + std::to_string(signo) + ", shutting down");
         loop.stop();
     });
 
@@ -144,10 +167,10 @@ int main(int argc, char** argv) {
 
     server.start();
 
-    icom::core::log_info("intercomd ready");
+    kLog.info("ready");
     loop.run();
 
-    icom::core::log_info("intercomd stopped");
+    kLog.info("stopped");
     audio->stop();
     return 0;
 }

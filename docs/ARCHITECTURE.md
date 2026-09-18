@@ -115,9 +115,87 @@ which explicitly does *not* share the reactor thread (see below).
   `Restart=on-failure` covers crashes; nothing here yet talks to
   `sd_notify()` (no `Type=notify`, no watchdog ping) -- worth adding once
   there's a real failure mode to detect and recover from.
-- **Logging**: `icom::core::log_*` writes leveled lines to stderr, which
-  journald captures automatically under systemd; no explicit journald
-  integration needed for that alone.
+- **Logging**: see "Logging" below.
+
+## Logging
+
+`icom::core::Logger` (`src/core/include/icom/core/logger.hpp`) is a named,
+independently-leveled logger -- roughly one per module -- writing through
+`syslog(3)`. Under systemd that lands in the journal exactly like any other
+well-behaved daemon's log output (`journalctl -u intercomd`, or filter by
+identifier with `journalctl -t icom2000`); on a plain Raspberry Pi OS
+install without a separate rsyslog it's journald providing `/dev/log`
+either way, so there's nothing extra to set up.
+
+(This module started from a request to log "to the kernel log" --
+`/dev/kmsg`/`dmesg`. That's a real, different thing from syslog: writing
+`/dev/kmsg` requires `CAP_SYSLOG` or root and shows up in `dmesg` whether
+or not a syslog daemon is even running, whereas `syslog(3)` needs no
+special privilege but requires something listening on `/dev/log`. This
+project uses `syslog(3)` -- it's the conventional destination for a
+userspace daemon's own logs, works with the unprivileged systemd unit this
+project already ships, and every message still ends up in the journal.)
+
+### Per-component levels
+
+Each `.cpp` file that logs declares its own logger once, at file scope:
+
+```cpp
+namespace {
+icom::core::Logger& kLog = icom::core::get_logger("hw.bell");
+} // namespace
+```
+
+and then just calls `kLog.debug(...)`/`.info(...)`/`.warn(...)`/`.error(...)`
+wherever it wants -- that's the whole mechanism for "insert log output
+where I want": add a `kLog` line if the file doesn't have one yet
+(matching the dotted `module.submodule` naming already in use -- see any
+existing `.cpp` under `src/` for the pattern), then log. Current
+components: `core.event_loop`, `gpio.mock`, `gpio.gpiod`, `hw.bell`,
+`hw.tcm1171`, `audio`, `ipc.control_server`, `app`.
+
+Levels are set at startup, per component, via the `ICOM_LOG` environment
+variable or `intercomd --log-level`, both parsed by the same
+`configure_levels()`:
+
+```
+ICOM_LOG="warn,gpio.mock=debug,ipc.control_server=debug" intercomd
+intercomd --log-level "warn,gpio.mock=debug,ipc.control_server=debug"
+```
+
+The bare `warn` sets the default for every component not otherwise named;
+`gpio.mock=debug` and `ipc.control_server=debug` override just those two.
+`--log-level` takes precedence over `ICOM_LOG` when both are given (so you
+can bump one component for a single run without editing the systemd unit's
+`Environment=`). Either input is rejected as a whole -- `intercomd` prints
+an error and exits nonzero -- if it contains an unrecognized level name or
+malformed component/level pair, rather than silently keeping whatever
+levels components happened to default to.
+
+### Why the registry is a function-local static
+
+`get_logger()`'s registry is a Meyer's singleton (a `static Registry` local
+to a function), not a plain namespace-scope global. Several `.cpp` files
+declare their `Logger& kLog` as a namespace-scope variable, which runs
+during that translation unit's *dynamic initialization* -- and the C++
+standard leaves the relative order of dynamic initialization across
+different translation units unspecified. A plain global registry could
+easily end up read by one TU's `kLog` initializer before another TU's
+initializer had constructed it. A function-local static sidesteps the
+question entirely: it's guaranteed to be constructed on its first use, no
+matter which TU that first use comes from.
+
+### Logging tests
+
+`tests/logger_tests.cpp` covers the registry (identity, per-component
+levels) and `configure_levels()`'s parsing, including that a rejected spec
+changes nothing. It does not check that a message actually reaches
+`syslog` -- that was instead verified manually against this exact build,
+by standing up a throwaway `AF_UNIX SOCK_DGRAM` listener at `/dev/log` and
+running `intercomd` against it (there's no standing fake-syslog fixture in
+the repo; it isn't worth automating a Unix-socket receiver for one
+integration check when the actual `syslog(3)` call is standard,
+decades-stable POSIX API).
 
 ## GPIO abstraction
 
@@ -238,13 +316,15 @@ third-party framework (Catch2/doctest/GTest) via `FetchContent`, so
 is a ~20-line `CHECK()` macro. Swapping in a real framework later is a
 one-file change once the suite outgrows that.
 
-What's covered: `MockBackend` output/input behavior, and that an injected
-mock edge reaches an `EventLoop` callback end-to-end -- i.e. the same path
-`Tcm1171Controller` depends on in production. What's not: `GpiodBackend`
-(no libgpiod in this environment) and anything in `src/hw`/`src/ipc`/
-`src/app` (straightforward to add following the same pattern; left out of
-this pass to keep it to "one representative example per layer" per the
-scaffold's brief).
+Two binaries, each its own `ctest` case: `icom_tests` covers `MockBackend`
+output/input behavior, and that an injected mock edge reaches an
+`EventLoop` callback end-to-end -- i.e. the same path `Tcm1171Controller`
+depends on in production. `icom_logger_tests` covers the logging registry
+and `configure_levels()` parsing (see "Logging" above). What's not
+covered: `GpiodBackend` (no libgpiod in this environment) and anything in
+`src/hw`/`src/ipc`/`src/app` beyond logging (straightforward to add
+following the same pattern; left out of this pass to keep it to "one
+representative example per layer" per the scaffold's brief).
 
 ## What's next
 

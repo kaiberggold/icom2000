@@ -5,6 +5,10 @@
 
 namespace icom::hw {
 
+namespace {
+core::Logger& kLog = core::get_logger("hw.tcm1171");
+} // namespace
+
 const char* to_string(LineState state) {
     switch (state) {
         case LineState::OnHook:  return "on-hook";
@@ -29,7 +33,7 @@ Tcm1171Controller::Tcm1171Controller(Pins pins, core::EventLoop& loop, StateChan
                 });
         });
     } else {
-        core::log_warn("tcm1171: hook_detect pin has no edge support; hook state will never update");
+        kLog.warn("hook_detect pin has no edge support; hook state will never update");
     }
 }
 
@@ -37,8 +41,7 @@ LineState Tcm1171Controller::state() const { return state_.load(); }
 
 void Tcm1171Controller::start_ringing() {
     if (state() != LineState::OnHook) {
-        core::log_warn(std::string("tcm1171: refusing to start ringing from state ") +
-                        to_string(state()));
+        kLog.warn(std::string("refusing to start ringing from state ") + to_string(state()));
         return;
     }
     pins_.ring_mode->write(gpio::Level::High);
@@ -58,7 +61,7 @@ void Tcm1171Controller::set_state(LineState next) {
     if (previous == next) {
         return;
     }
-    core::log_info(std::string("tcm1171: ") + to_string(previous) + " -> " + to_string(next));
+    kLog.info(std::string(to_string(previous)) + " -> " + to_string(next));
     if (on_change_) {
         on_change_(previous, next);
     }

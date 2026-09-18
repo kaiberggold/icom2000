@@ -17,6 +17,8 @@ namespace icom::core {
 
 namespace {
 
+Logger& kLog = get_logger("core.event_loop");
+
 void throw_errno(std::string_view what) {
     throw std::runtime_error(std::string(what) + ": " + std::strerror(errno));
 }
@@ -137,7 +139,7 @@ void EventLoop::run(std::stop_token token) {
             if (errno == EINTR) {
                 continue;
             }
-            log_error(std::string("poll() failed: ") + std::strerror(errno));
+            kLog.error(std::string("poll() failed: ") + std::strerror(errno));
             break;
         }
 

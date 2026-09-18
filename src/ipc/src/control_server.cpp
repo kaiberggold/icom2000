@@ -17,6 +17,8 @@ namespace icom::ipc {
 
 namespace {
 
+core::Logger& kLog = core::get_logger("ipc.control_server");
+
 std::string to_upper(std::string s) {
     std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return std::toupper(c); });
     return s;
@@ -78,7 +80,7 @@ void ControlServer::start() {
     }
 
     loop_.add_fd(listen_fd_, POLLIN, [this](short revents) { on_listen_readable(revents); });
-    core::log_info("control server: listening on " + socket_path_);
+    kLog.info("listening on " + socket_path_);
 }
 
 void ControlServer::on_listen_readable(short /*revents*/) {
@@ -86,7 +88,7 @@ void ControlServer::on_listen_readable(short /*revents*/) {
         const int client_fd = ::accept4(listen_fd_, nullptr, nullptr, SOCK_NONBLOCK);
         if (client_fd < 0) {
             if (errno != EAGAIN && errno != EWOULDBLOCK) {
-                core::log_warn(std::string("control server: accept() failed: ") + std::strerror(errno));
+                kLog.warn(std::string("accept() failed: ") + std::strerror(errno));
             }
             return;
         }

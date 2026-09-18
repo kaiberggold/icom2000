@@ -1,21 +1,90 @@
 #pragma once
 
+#include <atomic>
+#include <string>
 #include <string_view>
+
+#include <syslog.h>
 
 namespace icom::core {
 
-// Deliberately tiny: writes leveled lines to stderr, which systemd/journald
-// captures on their own. Swap for spdlog or similar later if a project
-// actually needs structured/async logging -- not worth the dependency yet.
 enum class LogLevel { Debug, Info, Warn, Error };
 
-void set_min_log_level(LogLevel level);
+// A named, independently-leveled logger -- roughly one per module ("gpio",
+// "gpio.mock", "hw.tcm1171", "ipc.control_server", ...). Get one via
+// get_logger() (or a per-file reference to it, see any .cpp under src/ for
+// the pattern); never construct one directly, so every component that
+// exists is visible in one place (the registry) for whoever is tuning
+// levels.
+//
+// Writes go to syslog(3) -- under systemd that lands in the journal
+// (`journalctl`), same as any other well-behaved daemon; see
+// docs/ARCHITECTURE.md "Logging" for why syslog rather than the kernel
+// ring buffer (/dev/kmsg) despite the "kernel log" framing this started
+// from. glibc's syslog() never throws or blocks the caller on failure
+// (e.g. no /dev/log present) -- worst case a call here is a silent no-op,
+// which is why nothing in this header reports an error for a failed log().
+class Logger {
+public:
+    Logger(std::string component, LogLevel level);
 
-void log(LogLevel level, std::string_view message);
+    void set_level(LogLevel level) { level_.store(level, std::memory_order_relaxed); }
+    LogLevel level() const { return level_.load(std::memory_order_relaxed); }
+    const std::string& component() const { return component_; }
 
-inline void log_debug(std::string_view message) { log(LogLevel::Debug, message); }
-inline void log_info(std::string_view message) { log(LogLevel::Info, message); }
-inline void log_warn(std::string_view message) { log(LogLevel::Warn, message); }
-inline void log_error(std::string_view message) { log(LogLevel::Error, message); }
+    void log(LogLevel level, std::string_view message) const;
+
+    void debug(std::string_view message) const { log(LogLevel::Debug, message); }
+    void info(std::string_view message) const { log(LogLevel::Info, message); }
+    void warn(std::string_view message) const { log(LogLevel::Warn, message); }
+    void error(std::string_view message) const { log(LogLevel::Error, message); }
+
+private:
+    std::string component_;
+    std::atomic<LogLevel> level_;
+};
+
+// Returns the process-wide logger for `component`, creating it (at the
+// current default level) on first use. Safe to call from a namespace-scope
+// initializer in any translation unit, in any order relative to other
+// translation units' initializers -- see logging.cpp for why that's
+// exactly the guarantee this needs.
+Logger& get_logger(std::string_view component);
+
+// Sets the level newly-created loggers start at. Does not touch loggers
+// that already exist; see configure_levels() for changing everything at
+// once.
+void set_default_level(LogLevel level);
+
+// Parses a spec like "warn,gpio=debug,ipc.control_server=debug" and
+// applies it in one shot:
+//   - a bare `level` token sets the default level (see
+//     set_default_level()) and is applied immediately to every
+//     already-registered logger not otherwise named in this same spec;
+//   - a `component=level` token sets that one logger's level, creating
+//     the logger first if it doesn't exist yet.
+// Whitespace around commas and `=` is ignored; level names are matched
+// case-insensitively (component names are not -- they must match a
+// registered logger's name exactly, e.g. "gpio.mock"). At most one bare
+// token is allowed. Returns false -- and leaves every level unchanged --
+// if the spec contains an unrecognized level name, an empty component
+// name, or more than one bare token; the whole spec is validated before
+// any of it is applied.
+bool configure_levels(std::string_view spec);
+
+// configure_levels() using the value of environment variable `env_var`
+// (default ICOM_LOG). No-op if the variable is unset or empty. Returns
+// false under the same conditions configure_levels() does.
+bool configure_levels_from_env(const char* env_var = "ICOM_LOG");
+
+// Opens the syslog connection every Logger writes through (openlog(3)).
+// Call once, early in main(), before spawning any other thread --
+// openlog()'s `ident` is retained by pointer, not copied, by glibc, so
+// this keeps its own copy alive for the process lifetime rather than
+// trusting the caller's string to outlive every future log() call.
+// Logging before this runs still works (glibc opens the connection
+// lazily with default settings on first syslog() call); it just won't
+// carry `ident`/`facility` yet.
+void init_syslog(std::string_view ident, int facility = LOG_DAEMON);
 
 } // namespace icom::core

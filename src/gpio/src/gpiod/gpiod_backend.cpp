@@ -18,6 +18,8 @@ namespace icom::gpio {
 
 namespace {
 
+core::Logger& kLog = core::get_logger("gpio.gpiod");
+
 std::string chip_path(const std::string& chip) {
     // Accept either a bare name ("gpiochip0") or an already-qualified path.
     if (!chip.empty() && chip.front() == '/') {
@@ -102,8 +104,8 @@ std::unique_ptr<OutputPin> GpiodBackend::request_output(const PinConfig& config,
                        .add_line_settings(config.line, settings)
                        .do_request();
 
-    core::log_info("gpiod: requested output " + config.chip + ":" + std::to_string(config.line) +
-                    " (" + config.consumer + ")");
+    kLog.info("requested output " + config.chip + ":" + std::to_string(config.line) + " (" +
+              config.consumer + ")");
     return std::make_unique<GpiodOutputPin>(std::move(request), config.line, initial);
 }
 
@@ -121,8 +123,8 @@ std::unique_ptr<InputPin> GpiodBackend::request_input(const PinConfig& config, E
                        .add_line_settings(config.line, settings)
                        .do_request();
 
-    core::log_info("gpiod: requested input " + config.chip + ":" + std::to_string(config.line) + " (" +
-                    config.consumer + ")");
+    kLog.info("requested input " + config.chip + ":" + std::to_string(config.line) + " (" +
+              config.consumer + ")");
     return std::make_unique<GpiodInputPin>(std::move(request), config.line);
 }
 

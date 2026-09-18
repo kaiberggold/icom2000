@@ -5,10 +5,12 @@ namespace icom::audio {
 
 namespace {
 
+core::Logger& kLog = core::get_logger("audio");
+
 class NullAudioEngine final : public AudioEngine {
 public:
     void start() override {
-        core::log_warn("audio: NullAudioEngine::start() -- no audio path implemented yet");
+        kLog.warn("NullAudioEngine::start() -- no audio path implemented yet");
         running_ = true;
     }
 
