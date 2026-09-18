@@ -26,11 +26,22 @@
                 "ICOM_WITH_LIBGPIOD": "ON",
                 "ICOM_BUILD_TESTS": "OFF"
             }
+        },
+        {
+            "name": "pi0-debug",
+            "displayName": "Raspberry Pi Zero (armv6) cross debug build",
+            "description": "Same target as pi0-release but unoptimized (-O0 -g), for gdbserver debugging on real hardware -- see docs/VSCODE_WSL2_SETUP.md. Optimized RelWithDebInfo code is usable with a debugger but variables/steps can appear to jump around; use this preset when that gets in the way.",
+            "inherits": "pi0-release",
+            "binaryDir": "${sourceDir}/build/pi0-debug",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
         }
     ],
     "buildPresets": [
         { "name": "host-dev", "configurePreset": "host-dev" },
-        { "name": "pi0-release", "configurePreset": "pi0-release" }
+        { "name": "pi0-release", "configurePreset": "pi0-release" },
+        { "name": "pi0-debug", "configurePreset": "pi0-debug" }
     ],
     "testPresets": [
         { "name": "host-dev", "configurePreset": "host-dev", "output": { "outputOnFailure": true } }

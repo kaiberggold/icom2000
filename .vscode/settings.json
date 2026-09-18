@@ -1,0 +1,29 @@
+{
+    // CMake Tools reads CMakePresets.json directly -- pick the active
+    // configure/build preset from the status bar (or "CMake: Select
+    // Configure Preset"), it drives both the build and IntelliSense.
+    "cmake.sourceDirectory": "${workspaceFolder}",
+    "cmake.useCMakePresets": "always",
+    "cmake.configureOnOpen": true,
+
+    "C_Cpp.default.cppStandard": "c++20",
+    "C_Cpp.default.cStandard": "c17",
+    // IntelliSense config actually comes from CMake Tools (via each
+    // preset's compile_commands.json); this is just the fallback for files
+    // opened before the first configure runs.
+    "C_Cpp.intelliSenseEngine": "default",
+
+    "files.associations": {
+        "*.hpp": "cpp"
+    },
+
+    // clangd and cpptools both parsing the same compile_commands.json path
+    // is harmless, but keep the tree free of stray build-dir noise in the
+    // editor's file explorer/search.
+    "files.exclude": {
+        "**/build": true
+    },
+    "search.exclude": {
+        "**/build": true
+    }
+}
