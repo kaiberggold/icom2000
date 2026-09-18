@@ -1,0 +1,48 @@
+#include "icom/core/signal_watcher.hpp"
+#include "icom/core/logger.hpp"
+
+#include <cerrno>
+#include <csignal>
+#include <cstring>
+#include <stdexcept>
+
+#include <poll.h>
+#include <sys/signalfd.h>
+#include <unistd.h>
+
+namespace icom::core {
+
+SignalWatcher::SignalWatcher(EventLoop& loop, std::initializer_list<int> signals,
+                              std::function<void(int)> on_signal)
+    : loop_(loop) {
+    sigset_t mask;
+    sigemptyset(&mask);
+    for (int sig : signals) {
+        sigaddset(&mask, sig);
+    }
+
+    if (sigprocmask(SIG_BLOCK, &mask, nullptr) != 0) {
+        throw std::runtime_error(std::string("sigprocmask() failed: ") + std::strerror(errno));
+    }
+
+    fd_ = signalfd(-1, &mask, SFD_NONBLOCK);
+    if (fd_ < 0) {
+        throw std::runtime_error(std::string("signalfd() failed: ") + std::strerror(errno));
+    }
+
+    loop_.add_fd(fd_, POLLIN, [this, cb = std::move(on_signal)](short) {
+        signalfd_siginfo info{};
+        while (::read(fd_, &info, sizeof(info)) == sizeof(info)) {
+            cb(static_cast<int>(info.ssi_signo));
+        }
+    });
+}
+
+SignalWatcher::~SignalWatcher() {
+    if (fd_ >= 0) {
+        loop_.remove_fd(fd_);
+        ::close(fd_);
+    }
+}
+
+} // namespace icom::core

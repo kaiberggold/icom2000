@@ -1,0 +1,33 @@
+#pragma once
+
+#include <memory>
+
+namespace icom::audio {
+
+// Boundary for the audio path -- out of scope for this pass (see
+// docs/ARCHITECTURE.md "Audio boundary"), stubbed here so the daemon's
+// composition root has a real seam to wire a working implementation into
+// later without reshaping app/daemon_main.cpp.
+//
+// The eventual implementation owns two mono ALSA duplex streams against the
+// Codec Zero (handset audio to/from the TCM1171's VSP pins on one channel,
+// door/bell/ambient on the other) on its own thread(s) with real-time
+// scheduling, communicating with the reactor thread via lock-free queues --
+// deliberately NOT folded into the EventLoop's poll(), since audio I/O has
+// hard timing needs poll()'s single-threaded dispatch shouldn't be allowed
+// to jitter.
+class AudioEngine {
+public:
+    virtual ~AudioEngine() = default;
+
+    virtual void start() = 0;
+    virtual void stop() = 0;
+    virtual bool is_running() const = 0;
+};
+
+// No-op implementation so the daemon can run end-to-end today. Swap out in
+// the composition root (src/app/daemon_main.cpp) once a real ALSA-backed
+// AudioEngine exists.
+std::unique_ptr<AudioEngine> make_null_audio_engine();
+
+} // namespace icom::audio
