@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cerrno>
 #include <cstring>
+#include <ctime>
 #include <stdexcept>
 #include <unordered_map>
 #include <vector>
@@ -21,6 +22,19 @@ Logger& log = getLogger("core.event_loop");
 
 void throwErrno(std::string_view what) {
     throw std::runtime_error(std::string(what) + ": " + std::strerror(errno));
+}
+
+// The one place a chrono duration gets translated into the POSIX
+// {seconds, nanoseconds} pair timerfd_settime() wants, so the narrowing
+// casts (chrono's rep is a 64-bit count on every platform this targets;
+// timespec::tv_sec/tv_nsec are not, notably tv_nsec is a 32-bit `long` on
+// ARM32) live in one named function instead of two unchecked field
+// assignments at the call site.
+timespec toTimespec(std::chrono::nanoseconds duration) {
+    using namespace std::chrono;
+    const auto secs = duration_cast<seconds>(duration);
+    return timespec{static_cast<std::time_t>(secs.count()),
+                    static_cast<long>((duration - secs).count())};
 }
 
 } // namespace
@@ -79,12 +93,8 @@ EventLoop::TimerId EventLoop::addTimer(std::chrono::milliseconds interval, bool 
         throwErrno("timerfd_create() failed");
     }
 
-    const auto secs = std::chrono::duration_cast<std::chrono::seconds>(interval);
-    const auto nsecs = std::chrono::duration_cast<std::chrono::nanoseconds>(interval - secs);
-
     itimerspec spec{};
-    spec.it_value.tv_sec = secs.count();
-    spec.it_value.tv_nsec = nsecs.count();
+    spec.it_value = toTimespec(std::chrono::duration_cast<std::chrono::nanoseconds>(interval));
     if (repeat) {
         spec.it_interval = spec.it_value;
     }
