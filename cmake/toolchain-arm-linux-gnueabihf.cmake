@@ -21,18 +21,40 @@
 set(CMAKE_SYSTEM_NAME Linux)
 set(CMAKE_SYSTEM_PROCESSOR arm)
 
-set(_icom_toolchain_prefix arm-linux-gnueabihf)
+# A toolchain you build yourself doesn't have to use this exact triplet --
+# e.g. crosstool-NG's own "armv6-unknown-linux-gnueabihf" sample (see
+# docs/CROSS_COMPILE.md "Option B") sets CT_TARGET_VENDOR="rpi", producing
+# arm-rpi-linux-gnueabihf-gcc, not arm-linux-gnueabihf-gcc. Both are tried
+# automatically; set ICOM_TOOLCHAIN_PREFIX explicitly if yours is neither.
+set(ICOM_TOOLCHAIN_PREFIX "" CACHE STRING
+    "Cross-toolchain binary prefix (e.g. 'arm-rpi-linux-gnueabihf'). Auto-detected if empty.")
 
-find_program(CMAKE_C_COMPILER NAMES ${_icom_toolchain_prefix}-gcc)
-find_program(CMAKE_CXX_COMPILER NAMES ${_icom_toolchain_prefix}-g++)
+if(ICOM_TOOLCHAIN_PREFIX)
+    set(_icom_toolchain_prefix "${ICOM_TOOLCHAIN_PREFIX}")
+    find_program(CMAKE_C_COMPILER NAMES ${_icom_toolchain_prefix}-gcc)
+    find_program(CMAKE_CXX_COMPILER NAMES ${_icom_toolchain_prefix}-g++)
+else()
+    foreach(_icom_candidate_prefix arm-linux-gnueabihf arm-rpi-linux-gnueabihf)
+        find_program(_icom_candidate_gcc NAMES ${_icom_candidate_prefix}-gcc)
+        if(_icom_candidate_gcc)
+            set(_icom_toolchain_prefix "${_icom_candidate_prefix}")
+            set(CMAKE_C_COMPILER "${_icom_candidate_gcc}")
+            find_program(CMAKE_CXX_COMPILER NAMES ${_icom_candidate_prefix}-g++)
+            break()
+        endif()
+        unset(_icom_candidate_gcc CACHE)
+    endforeach()
+endif()
 
 if(NOT CMAKE_C_COMPILER OR NOT CMAKE_CXX_COMPILER)
     message(FATAL_ERROR
-        "${_icom_toolchain_prefix}-gcc/g++ not found on PATH.\n"
+        "No arm-linux-gnueabihf-gcc/g++ (or arm-rpi-linux-gnueabihf-gcc/g++) "
+        "found on PATH.\n"
         "Install an armv6 arm-linux-gnueabihf toolchain (or the Raspberry Pi OS "
         "chroot/QEMU approach) -- see docs/CROSS_COMPILE.md. A plain "
         "'apt install crossbuild-essential-armhf' targets ARMv7 and will not "
-        "run on a Pi Zero 1.1.")
+        "run on a Pi Zero 1.1. If your toolchain uses a different prefix "
+        "entirely, set -DICOM_TOOLCHAIN_PREFIX=<prefix>.")
 endif()
 
 # Optional: a copy of the Pi's root filesystem (rsynced from a running

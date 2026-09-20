@@ -127,30 +127,89 @@ faster host CPU instead of on the Pi Zero's own core -- so
 closer to what you want here than `pi0-release` is; skip the toolchain
 file and just configure directly as shown above.
 
-## Option B: a real ARMv6 cross toolchain
+## Option B: build a real ARMv6 toolchain with crosstool-NG
 
-If you already have (or want to build with `crosstool-NG`) an
-`arm-linux-gnueabihf-gcc`/`g++` that itself targets `arm1176jzf-s`/armv6 --
-meaning its *own* `crt1.o`/`libgcc.a` were built for ARMv6, not just able
-to accept `-march=armv6zk` without complaint -- `cmake/toolchain-arm-linux-gnueabihf.cmake`
-and the `pi0-release`/`pi0-debug` presets are set up for it, and the
-automated probe above will confirm it for you at configure time.
+`crosstool-NG` builds a complete, self-contained cross-compiler
+(binutils + gcc + glibc, from source) for whatever target you configure
+it for. Done right, its `crt1.o`/`libgcc.a` are genuinely built for
+ARMv6, unlike Debian/Ubuntu's package -- `cmake/toolchain-arm-linux-gnueabihf.cmake`
+and the `pi0-release`/`pi0-debug` presets are already set up for one, and
+the automated probe above will confirm it actually worked.
 
-Options for getting one, roughly in order of effort: a `crosstool-NG`
-build configured for `arm-unknown-linux-gnueabihf` with
-`arm1176jzf-s`/`armv6` CPU settings (correct, but crosstool-NG builds a
-full gcc+glibc from source, expect this to take a while); a
-community-maintained Pi-specific toolchain if you can find one still
-maintained for current glibc; or the historical `tools/arm-bcm2708/...`
-toolchain from the `raspberrypi/tools` repo (deprecated, old glibc --
-fine for a quick experiment, not for anything you'll maintain).
+There's a ready-made sample for exactly this board, confirmed by reading
+crosstool-NG's own sample config: `armv6-unknown-linux-gnueabihf`, whose
+`reported.by` file literally says *"Toolchain for the Raspberry Pi, with
+hard-float"*, and whose settings are exactly right --
+`CT_ARCH_CPU="arm1176jzf-s"`, `CT_ARCH_FPU="vfp"`, `CT_ARCH_FLOAT_HW=y`
+(hard-float). Two things about it are worth knowing before you build,
+both confirmed by inspection, not guessed:
 
-Once you have one:
+- **Its default glibc version (2.44 as of the crosstool-NG revision
+  checked) is almost certainly newer than whatever's on your actual Pi**,
+  and a binary linked against a newer glibc than the target has will fail
+  to run there (`version 'GLIBC_2.xx' not found`) -- glibc compatibility
+  only goes one direction (older-built binaries run fine on newer
+  systems, not the reverse). Check what your Pi actually has
+  (`ssh pi@your-pi ldd --version`, first line) and pin crosstool-NG's
+  glibc version to that or older, in step 3 below. If you don't know or
+  don't want to bother checking, 2.31 (Debian Bullseye's baseline, and
+  the value in the exact commands below) is a safe, conservative choice
+  that will run on any Raspberry Pi OS release from Bullseye onward,
+  including current Bookworm.
+- **It sets `CT_TARGET_VENDOR="rpi"`**, so the built compiler is
+  `arm-rpi-linux-gnueabihf-gcc`, not `arm-linux-gnueabihf-gcc`. This
+  project's toolchain file already looks for both names automatically
+  (see its `ICOM_TOOLCHAIN_PREFIX` handling) -- nothing extra to do here,
+  just don't be surprised by the binary names it produces.
+
+Concrete steps:
 
 ```sh
+# 1. Host build dependencies (Ubuntu/Debian; crosstool-NG needs quite a
+#    few -- this is the full list, not a partial one you'll have to top
+#    up piecemeal):
+sudo apt install build-essential gperf bison flex texinfo help2man \
+    libtool-bin automake autoconf gawk libncurses-dev unzip rsync \
+    bzip2 xz-utils patch git wget curl
+
+# 2. Build crosstool-NG itself (this builds the *builder tool*, not the
+#    cross-compiler yet -- a couple of minutes):
+git clone https://github.com/crosstool-ng/crosstool-ng.git
+cd crosstool-ng
+./bootstrap && ./configure --enable-local && make -j"$(nproc)"
+
+# 3. Load the Pi-specific sample, then pin the glibc version (see above
+#    for why) before building:
+mkdir ~/armv6-toolchain-build && cd ~/armv6-toolchain-build
+~/crosstool-ng/ct-ng armv6-unknown-linux-gnueabihf
+~/crosstool-ng/ct-ng menuconfig
+#   -> "C-library" -> "Version of glibc" -> pick 2.31 (or your Pi's
+#      version from `ldd --version`) -- everything else in this sample
+#      is already correct, this is the one thing worth changing.
+#   -> optionally "Paths and misc options" -> "Number of parallel jobs"
+#      to match your core count.
+
+# 4. Build. This compiles gcc twice (a bootstrap pass, then the real
+#    one) plus binutils and glibc from source -- expect anywhere from
+#    ~30 minutes to a couple of hours depending on your machine, and a
+#    few GB of downloads (source tarballs for gcc/glibc/binutils/Linux
+#    headers, mostly from gnu.org and kernel.org -- make sure nothing on
+#    your network blocks those before you start):
+~/crosstool-ng/ct-ng build
+
+# 5. The finished toolchain lands in ~/x-tools/arm-rpi-linux-gnueabihf/bin
+#    by default -- put it on PATH:
+export PATH="$HOME/x-tools/arm-rpi-linux-gnueabihf/bin:$PATH"
+
+# 6. Build icom2000 with it:
+cd /path/to/icom2000
 cmake --preset pi0-release
 cmake --build --preset pi0-release
 ```
+
+**Do not run crosstool-NG as root** -- it refuses by design (a real
+safety feature, not a bug to work around), and legitimately shouldn't
+need to be root for anything it does.
 
 No `ICOM_PI_SYSROOT` needed for this alone -- libgpiod cross-builds from
 source automatically (see below), and everything else intercomd links
