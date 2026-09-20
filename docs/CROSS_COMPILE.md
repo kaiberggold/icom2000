@@ -269,7 +269,24 @@ OS filesystem, and rebuilding it yourself is pure waste), set
 `pkg_check_modules` lookup against `ICOM_PI_SYSROOT`, requiring both
 `libgpiod.pc` and `libgpiodcxx.pc` to be present there.
 
-## Sanity-checking a binary before deploying it
+## intercomd carries its own C++ runtime
+
+The toolchain file links with `-static-libgcc -static-libstdc++`, so
+`intercomd` doesn't depend on the target's own `libstdc++.so.6`/
+`libgcc_s.so.1` at all (`readelf -d` on the built binary shows only
+`libc.so.6`/`libm.so.6`/the dynamic linker as `NEEDED`). This matters
+more here than it would cross-compiling for a mainstream target: a
+self-built crosstool-NG toolchain (Option B) is very likely a
+dramatically newer GCC than whatever Raspberry Pi OS itself ships, and
+running code compiled by one GCC against a *different* GCC's dynamically
+linked C++ runtime is exactly the kind of mismatch that surfaces as a
+confusing crash deep inside STL internals rather than a clean link or
+load error -- this was hit for real: `SIGILL` inside `std::map`'s tree
+traversal, reached from `edge_event::type()` in libgpiod's C++ bindings,
+on a toolchain that had otherwise passed the ARMv6 probe cleanly. The
+`libc`/`libm` that stay dynamic are the correct exception -- those
+genuinely have to be the target's own, since they're the kernel-facing
+ABI boundary.
 
 The automated probe (above) already checks the toolchain itself at
 configure time, on every `pi0-release`/`pi0-debug` configure -- so this

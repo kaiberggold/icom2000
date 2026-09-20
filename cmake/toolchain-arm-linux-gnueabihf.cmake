@@ -35,6 +35,17 @@ set(_icom_cpu_flags "-marm -march=armv6zk -mtune=arm1176jzf-s -mfpu=vfp -mfloat-
 set(CMAKE_C_FLAGS_INIT "${_icom_cpu_flags}")
 set(CMAKE_CXX_FLAGS_INIT "${_icom_cpu_flags}")
 
+# A self-built cross toolchain (crosstool-NG, Option B) is very likely a
+# much newer GCC than whatever Raspberry Pi OS itself ships -- its own
+# libstdc++.so.6/libgcc_s.so.1 are a completely different build than the
+# ones already installed on the target, which is exactly what a
+# dynamically-linked C++ binary resolves against at runtime by default.
+# Statically linking our own matching copies in removes that mismatch as
+# a variable entirely, the same reasoning already applied to libgpiod
+# (see src/gpio/cmake/BuildLibgpiodFromSource.cmake) -- a deploy that's
+# `scp` one file, not "and hope the versions on the target line up".
+set(CMAKE_EXE_LINKER_FLAGS_INIT "-static-libgcc -static-libstdc++")
+
 # Exposed for anything else that needs to reproduce these exact target
 # flags outside CMake's own compiler invocations -- e.g. src/gpio's
 # ExternalProject build of libgpiod, which drives a *separate* build
