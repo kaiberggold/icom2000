@@ -103,8 +103,10 @@ icom::core::Logger& kLog = icom::core::get_logger("app");
 } // namespace
 
 int main(int argc, char** argv) {
-    icom::core::init_syslog("icom2000");
 
+    icom::core::init_syslog("icom2000");
+     kLog.info("Daemon started");
+    
     const Options opts = parse_args(argc, argv);
 
     if (opts.log_console) {
