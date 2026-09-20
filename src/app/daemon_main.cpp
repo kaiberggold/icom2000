@@ -36,6 +36,7 @@ using icom::hw::LineState;
 using icom::hw::StatusLed;
 using icom::hw::Tcm1171Controller;
 using icom::ipc::CommandResult;
+using namespace std::chrono_literals;
 
 namespace {
 
@@ -214,8 +215,8 @@ int main(int argc, char** argv) {
     },
     loop);
 
-    StatusLed status_led(gpioBackend->requestOutput(
-                             PinConfig{gpioChip, statusLedLine, "icom2000-status-led"}, Level::LOW));
+    StatusLed statusLed(gpioBackend->requestOutput(
+        PinConfig{gpioChip, statusLedLine, "icom2000-status-led"}, Level::LOW));
 
     auto audio = icom::audio::makeNullEngine(stations);
     audio->start();
@@ -259,8 +260,8 @@ int main(int argc, char** argv) {
 
     // Visual "the daemon is up and its main loop is about to start"
     // signal -- fire-and-forget, scheduled on `loop` itself rather than
-    // blocking startup for the ~900ms the full sequence takes.
-    status_led.blinkNTimes(3, loop);
+    // blocking startup for the ~300ms the full sequence takes.
+    statusLed.blinkNTimes(3, loop, 50ms, 50ms);
 
     log.info("ready");
     loop.run();
