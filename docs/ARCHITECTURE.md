@@ -272,15 +272,31 @@ libgpiod headers to exist.
   registers the input's edge fd with the `EventLoop` in its constructor,
   and exposes `LineState` (`OnHook`/`Ringing`/`OffHook`/`Fault`) plus
   `start_ringing()`/`stop_ringing()`.
+- **`StatusLed`** drives the Codec Zero HAT's own onboard green status LED
+  (GPIO23 -- see "Pin assignments" below for why that specific line).
+  `blink_n_times()` is its one interesting method: schedules `n` on/off
+  cycles on the `EventLoop` and returns immediately (a self-rescheduling
+  chain of one-shot timers, not a blocking sleep loop), so it's safe to
+  call right before `loop.run()` without delaying startup -- `daemon_main`
+  does exactly that, 3 blinks, as a "the daemon is up" visual check with
+  no console/network access needed.
 
 ### Pin assignments (placeholder)
 
-**Everything below is illustrative, not verified against a schematic.**
-`gpiochip0` lines 17 (bell), 27 (TCM1171 ring-mode), 22 (TCM1171 polarity),
-and 23 (hook detect) -- config/icom2000.conf's `[gpio.*]` sections, and
+**Everything below is illustrative, not verified against a schematic**,
+with one exception: GPIO23/24/27 are fixed by the HiFiBerry Codec Zero
+HAT's own spec, not a software choice -- **Power LED** (unconditional,
+not GPIO-driven), **green status LED = GPIO23**, **red status LED =
+GPIO24**, **tactile button = GPIO27**. `gpiochip0` lines 17 (bell), 5
+(TCM1171 ring-mode), 22 (TCM1171 polarity), 6 (hook detect), and 23
+(status LED) -- config/icom2000.conf's `[gpio.*]` sections, and
 `daemon_main.cpp`'s built-in defaults if that file is missing -- exist
-purely so the daemon has *something* to construct and run end-to-end.
-Before wiring real hardware:
+purely so the daemon has *something* to construct and run end-to-end
+(ring-mode/hook-detect originally sat on 27/23, which would have
+collided with the HAT's own button/LED the moment it was actually
+populated -- moved to 5/6 instead). GPIO24 and 27 are reserved the same
+way but nothing in this project drives them yet. Before wiring real
+hardware:
 
 1. Confirm the TCM1171's actual digital control pins on your board (RM,
    FR) and which GPIOs they land on.
