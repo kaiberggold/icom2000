@@ -40,15 +40,31 @@ This gets you, all driven from inside VS Code:
   watcher) -- there's no upside to it here.
 - When VS Code opens the folder the first time, it'll offer to install
   the recommended extensions from `.vscode/extensions.json`
-  (`ms-vscode.cpptools`, `ms-vscode.cmake-tools`) *inside* the WSL side --
-  accept that.
+  (`ms-vscode.cpptools`, `ms-vscode.cmake-tools`, `chiehyu.vscode-astyle`
+  for format-on-save -- see step 2 for its one host package dependency)
+  *inside* the WSL side -- accept that.
 
 ## 2. One-time package install (inside WSL2)
 
 ```sh
 sudo apt update
-sudo apt install build-essential cmake ninja-build gdb-multiarch openssh-client git
+sudo apt install build-essential cmake ninja-build gdb-multiarch openssh-client git astyle
 ```
+
+`astyle` is a separate concern from everything else here: it's what
+`.vscode/settings.json`'s format-on-save actually shells out to (via the
+`chiehyu.vscode-astyle` extension, in `.vscode/extensions.json`'s
+recommendations) -- edit any `.c`/`.cpp`/`.hpp` file and save, and it's
+reformatted to match `.astylerc` at the repo root automatically, so
+indentation/brace placement/spacing stop being something to think about by
+hand. It is **not** a perfect match for every hand-tuned line in this
+codebase -- astyle has no equivalent of clang-format's "align wrapped
+arguments with the opening bracket", so a saved file with a multi-line call
+(e.g. `Tcm1171Controller`'s construction in `daemon_main.cpp`) will have
+its continuation lines reformatted to astyle's own, less-aligned
+convention rather than kept as originally hand-aligned. Accepted as a
+one-time cosmetic cost for not manually chasing indentation elsewhere; see
+`.astylerc`'s own header comment for the reasoning.
 
 `gdb-multiarch` (not plain `gdb`) is what talks to the Pi Zero's `gdbserver`
 remotely: it understands ARM code without needing to itself be a
