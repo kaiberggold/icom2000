@@ -85,7 +85,12 @@ public:
     }
 
 private:
-    ::gpiod::line_request request_;
+    // mutable: gpiod::line_request::get_value() isn't const in libgpiod's
+    // C++ API (confirmed against the real header -- this file wasn't
+    // compile-tested when first written, see the file-level comment
+    // above), even though reading a pin's value is logically const from
+    // InputPin::read()'s perspective, same as any other hardware read.
+    mutable ::gpiod::line_request request_;
     unsigned line_;
 };
 

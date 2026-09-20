@@ -1,0 +1,24 @@
+[Unit]
+Description=Restore icom2000 Codec Zero mixer state (crossbar routing, levels)
+Documentation=man:alsactl(1)
+# Runs ahead of anything that wants a working sound card, intercomd
+# included (see systemd/intercomd.service's Wants=sound.target).
+Before=sound.target
+# The state file is generated on real hardware (`alsactl store`), not
+# shipped in this repo -- see config/README.md. Skip cleanly rather than
+# failing if it hasn't been created yet on a fresh install.
+ConditionPathExists=/etc/codec-zero-intercom.state
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# This is the ONLY place mixer state is ever set for this app -- see
+# docs/ARCHITECTURE.md "Centralized mixer state". intercomd itself never
+# calls the ALSA control API or shells out to a mixer CLI at runtime;
+# swapping this file's path for a different one (e.g. a DAC/ADC-based
+# variant supporting the network extension) is the entire routing change,
+# no application code touched.
+ExecStart=/usr/sbin/alsactl restore -f /etc/codec-zero-intercom.state
+
+[Install]
+WantedBy=sound.target
