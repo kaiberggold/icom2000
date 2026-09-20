@@ -18,12 +18,22 @@ include(ExternalProject)
 function(icom_build_libgpiod_from_source)
     find_program(ICOM_MESON_EXECUTABLE meson)
     find_program(ICOM_NINJA_EXECUTABLE ninja)
-    if(NOT ICOM_MESON_EXECUTABLE OR NOT ICOM_NINJA_EXECUTABLE)
+
+    set(_icom_missing_tools "")
+    if(NOT ICOM_MESON_EXECUTABLE)
+        list(APPEND _icom_missing_tools "meson")
+    endif()
+    if(NOT ICOM_NINJA_EXECUTABLE)
+        list(APPEND _icom_missing_tools "ninja")
+    endif()
+
+    if(_icom_missing_tools)
+        list(JOIN _icom_missing_tools "', '" _icom_missing_tools_joined)
         message(FATAL_ERROR
-            "ICOM_LIBGPIOD_BUILD_FROM_SOURCE=ON needs 'meson' and 'ninja' on "
-            "the HOST (they orchestrate the cross-build; they do not "
-            "themselves run on the target) -- install them, e.g. "
-            "'apt install meson ninja-build', or set "
+            "ICOM_LIBGPIOD_BUILD_FROM_SOURCE=ON needs '${_icom_missing_tools_joined}' "
+            "on the HOST (not found on PATH) -- it/they orchestrate the "
+            "cross-build; they do not themselves run on the target. Install "
+            "with e.g. 'apt install meson ninja-build', or set "
             "-DICOM_LIBGPIOD_BUILD_FROM_SOURCE=OFF and provide libgpiod via "
             "ICOM_PI_SYSROOT instead.")
     endif()
