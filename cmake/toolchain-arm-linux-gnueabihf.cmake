@@ -9,10 +9,13 @@
 # SIGILL on this board. This is *the* classic footgun cross-compiling for
 # Zero/Pi 1 -- see docs/CROSS_COMPILE.md for the two ways around it.
 #
-# This file assumes you already have an arm-linux-gnueabihf-{gcc,g++} that
+# This file assumes you already have an arm-*-gnueabihf-{gcc,g++} that
 # itself targets armv6 (e.g. built with crosstool-NG for arm1176jzf-s) --
-# it verifies that assumption itself, see "Sanity-check" below, rather
-# than just trusting it. libgpiod cross-builds from source as part of the
+# it verifies that assumption itself (see "Sanity-check" below) rather
+# than just trusting it, and picks a *working* one over a merely-present
+# one if more than one arm-*-gnueabihf toolchain is on PATH at once (the
+# common case once you've built your own next to a distro package you
+# never uninstalled). libgpiod cross-builds from source as part of the
 # main build (src/gpio/cmake/BuildLibgpiodFromSource.cmake) by default,
 # so no sysroot is needed for that specifically; ICOM_PI_SYSROOT below
 # remains available for anything else that genuinely needs to match the
@@ -20,56 +23,6 @@
 
 set(CMAKE_SYSTEM_NAME Linux)
 set(CMAKE_SYSTEM_PROCESSOR arm)
-
-# A toolchain you build yourself doesn't have to use this exact triplet --
-# e.g. crosstool-NG's own "armv6-unknown-linux-gnueabihf" sample (see
-# docs/CROSS_COMPILE.md "Option B") sets CT_TARGET_VENDOR="rpi", producing
-# arm-rpi-linux-gnueabihf-gcc, not arm-linux-gnueabihf-gcc. Both are tried
-# automatically; set ICOM_TOOLCHAIN_PREFIX explicitly if yours is neither.
-set(ICOM_TOOLCHAIN_PREFIX "" CACHE STRING
-    "Cross-toolchain binary prefix (e.g. 'arm-rpi-linux-gnueabihf'). Auto-detected if empty.")
-
-if(ICOM_TOOLCHAIN_PREFIX)
-    set(_icom_toolchain_prefix "${ICOM_TOOLCHAIN_PREFIX}")
-    find_program(CMAKE_C_COMPILER NAMES ${_icom_toolchain_prefix}-gcc)
-    find_program(CMAKE_CXX_COMPILER NAMES ${_icom_toolchain_prefix}-g++)
-else()
-    foreach(_icom_candidate_prefix arm-linux-gnueabihf arm-rpi-linux-gnueabihf)
-        find_program(_icom_candidate_gcc NAMES ${_icom_candidate_prefix}-gcc)
-        if(_icom_candidate_gcc)
-            set(_icom_toolchain_prefix "${_icom_candidate_prefix}")
-            set(CMAKE_C_COMPILER "${_icom_candidate_gcc}")
-            find_program(CMAKE_CXX_COMPILER NAMES ${_icom_candidate_prefix}-g++)
-            break()
-        endif()
-        unset(_icom_candidate_gcc CACHE)
-    endforeach()
-endif()
-
-if(NOT CMAKE_C_COMPILER OR NOT CMAKE_CXX_COMPILER)
-    message(FATAL_ERROR
-        "No arm-linux-gnueabihf-gcc/g++ (or arm-rpi-linux-gnueabihf-gcc/g++) "
-        "found on PATH.\n"
-        "Install an armv6 arm-linux-gnueabihf toolchain (or the Raspberry Pi OS "
-        "chroot/QEMU approach) -- see docs/CROSS_COMPILE.md. A plain "
-        "'apt install crossbuild-essential-armhf' targets ARMv7 and will not "
-        "run on a Pi Zero 1.1. If your toolchain uses a different prefix "
-        "entirely, set -DICOM_TOOLCHAIN_PREFIX=<prefix>.")
-endif()
-
-# Optional: a copy of the Pi's root filesystem (rsynced from a running
-# device, or extracted from a Raspberry Pi OS image) so find_package() etc.
-# can see target headers/libraries such as libgpiod-dev.
-set(ICOM_PI_SYSROOT "" CACHE PATH "Path to a Raspberry Pi OS sysroot (target headers/libs)")
-if(ICOM_PI_SYSROOT)
-    set(CMAKE_SYSROOT "${ICOM_PI_SYSROOT}")
-    set(CMAKE_FIND_ROOT_PATH "${ICOM_PI_SYSROOT}")
-endif()
-
-set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
-set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
-set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
-set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
 
 # Matches the flags Raspberry Pi OS's own toolchain uses for armv6 targets:
 # ARM1176JZF-S core, VFPv2 FPU, hard-float ABI. `-marm` matters as much as
@@ -91,11 +44,18 @@ set(CMAKE_CXX_FLAGS_INIT "${_icom_cpu_flags}")
 # that runs later in subdirectories.
 set(ICOM_TARGET_CPU_FLAGS "${_icom_cpu_flags}" CACHE INTERNAL "Target CPU flags, for build systems CMake doesn't drive directly")
 
-# pkg-config must resolve .pc files from the sysroot, not the host.
-set(ENV{PKG_CONFIG_LIBDIR} "${ICOM_PI_SYSROOT}/usr/lib/arm-linux-gnueabihf/pkgconfig:${ICOM_PI_SYSROOT}/usr/lib/pkgconfig:${ICOM_PI_SYSROOT}/usr/share/pkgconfig")
-set(ENV{PKG_CONFIG_SYSROOT_DIR} "${ICOM_PI_SYSROOT}")
+# A toolchain you build yourself doesn't have to use the generic
+# "arm-linux-gnueabihf" triplet -- e.g. crosstool-NG's own
+# "armv6-unknown-linux-gnueabihf" sample (see docs/CROSS_COMPILE.md
+# "Option B") sets CT_TARGET_VENDOR="rpi", producing
+# arm-rpi-linux-gnueabihf-gcc instead. Both names are tried automatically;
+# set ICOM_TOOLCHAIN_PREFIX explicitly if yours is neither, or if more
+# than one candidate on PATH actually works and auto-detection picks the
+# wrong one for your purposes.
+set(ICOM_TOOLCHAIN_PREFIX "" CACHE STRING
+    "Cross-toolchain binary prefix (e.g. 'arm-rpi-linux-gnueabihf'). Auto-detected if empty.")
 
-# --- Sanity-check: can this compiler actually PRODUCE an ARMv6 binary? ---
+# --- Sanity-check option, consulted by the discovery loop below ---
 #
 # Passing -march=armv6zk does not guarantee ARMv6 output. Confirmed by
 # direct testing: Ubuntu's (and, by all indications, Debian's)
@@ -114,75 +74,156 @@ set(ENV{PKG_CONFIG_SYSROOT_DIR} "${ICOM_PI_SYSROOT}")
 # fixable with different flags; it needs a toolchain whose runtime
 # objects were themselves built for ARMv6 (see docs/CROSS_COMPILE.md).
 #
-# This probe catches exactly that: compile+link a trivial program with
-# the real flags (so crt1.o/libgcc.a get pulled in the same way they
+# The probe below catches exactly that: compile+link a trivial program
+# with the real flags (so crt1.o/libgcc.a get pulled in the same way they
 # would for intercomd), then check the resulting binary's own
-# Tag_CPU_arch rather than trusting the flags we asked for.
+# Tag_CPU_arch rather than trusting the flags asked for -- run against
+# *each candidate toolchain in turn* during discovery, not just once
+# against whatever happened to be found first by name.
 option(ICOM_SKIP_ARMV6_CHECK "Skip the ARMv6 toolchain capability probe (only for testing this CMake config itself on a non-ARMv6-capable toolchain -- a binary built this way should not be trusted on real Pi Zero 1.x hardware)" OFF)
 
 # CMake re-includes this toolchain file for its own internal compiler-ABI
 # try_compile() checks, each in a throwaway "CMakeScratch" project with
-# its own cache -- one that never saw -DICOM_SKIP_ARMV6_CHECK, so the
-# option would silently reset to OFF and re-run (and re-fail) the probe
-# there instead of just letting that internal check proceed. None of
-# those scratch builds are intercomd's actual output, so skip unconditionally
-# whenever we're inside one.
+# its own cache -- one that never saw -DICOM_SKIP_ARMV6_CHECK or
+# -DICOM_TOOLCHAIN_PREFIX, so re-running the full probing dance there
+# would be redundant at best (those scratch builds are never intercomd's
+# actual output) and would re-fail an already-good configure at worst if
+# it picked a different, unverified candidate than the outer configure
+# did. Skip probing unconditionally whenever we're inside one; the
+# compiler still needs to be *found* there, just not re-verified.
 if(CMAKE_BINARY_DIR MATCHES "CMakeScratch")
     set(_icom_in_try_compile TRUE)
 else()
     set(_icom_in_try_compile FALSE)
 endif()
 
-if(NOT ICOM_SKIP_ARMV6_CHECK AND NOT _icom_in_try_compile)
-    find_program(_icom_readelf NAMES ${_icom_toolchain_prefix}-readelf)
+separate_arguments(_icom_cpu_flags_list UNIX_COMMAND "${_icom_cpu_flags}")
 
-    if(_icom_readelf)
-        set(_icom_probe_dir "${CMAKE_BINARY_DIR}/CMakeFiles/icom_armv6_probe")
-        file(MAKE_DIRECTORY "${_icom_probe_dir}")
-        file(WRITE "${_icom_probe_dir}/probe.c" "int main(void) { return 0; }\n")
+# --- Discover a toolchain, preferring one that actually passes the probe ---
+#
+# Tries each candidate prefix in turn; for each, if a *-gcc exists, it's
+# compile+readelf probed before being accepted (unless probing is
+# disabled below), so a working purpose-built toolchain is found even
+# when a broken one (e.g. the distro package) also happens to be on PATH
+# and would otherwise "win" by being searched first.
+if(ICOM_TOOLCHAIN_PREFIX)
+    set(_icom_candidate_prefixes "${ICOM_TOOLCHAIN_PREFIX}")
+else()
+    set(_icom_candidate_prefixes arm-linux-gnueabihf arm-rpi-linux-gnueabihf)
+endif()
 
-        separate_arguments(_icom_cpu_flags_list UNIX_COMMAND "${_icom_cpu_flags}")
-        execute_process(
-            COMMAND ${CMAKE_C_COMPILER} ${_icom_cpu_flags_list} -o "${_icom_probe_dir}/probe" "${_icom_probe_dir}/probe.c"
-            RESULT_VARIABLE _icom_probe_rc
-            OUTPUT_QUIET ERROR_QUIET
-        )
+set(_icom_probe_report "")
 
-        if(_icom_probe_rc EQUAL 0)
-            execute_process(
-                COMMAND ${_icom_readelf} -A "${_icom_probe_dir}/probe"
-                OUTPUT_VARIABLE _icom_probe_attrs
-                ERROR_QUIET
-            )
-            if(NOT _icom_probe_attrs MATCHES "Tag_CPU_arch: v6")
-                message(FATAL_ERROR
-                    "${_icom_toolchain_prefix}-gcc does not produce genuine ARMv6 "
-                    "binaries. A trivial program compiled with the exact target "
-                    "flags ('${_icom_cpu_flags}') still links in non-ARMv6 "
-                    "runtime code -- readelf -A reports:\n\n"
-                    "${_icom_probe_attrs}\n"
-                    "This is a known limitation of Debian/Ubuntu's packaged "
-                    "gcc-arm-linux-gnueabihf: its crt1.o and libgcc.a are only "
-                    "built for ARMv7-A, regardless of -march. No combination of "
-                    "flags fixes this -- see docs/CROSS_COMPILE.md for toolchains "
-                    "that actually work (a QEMU-chroot build against real "
-                    "Raspberry Pi OS, or a crosstool-NG toolchain built for "
-                    "arm1176jzf-s). To bypass this check anyway (e.g. to test "
-                    "this CMake configuration itself, NOT to produce a binary "
-                    "for real hardware), reconfigure with "
-                    "-DICOM_SKIP_ARMV6_CHECK=ON.")
-            endif()
-        else()
-            message(WARNING
-                "Could not run the ARMv6 toolchain probe (compiling a trivial "
-                "program with '${_icom_cpu_flags}' failed) -- continuing "
-                "anyway, but this toolchain may not work at all. See "
-                "docs/CROSS_COMPILE.md if the build fails.")
-        endif()
-    else()
+foreach(_icom_candidate_prefix ${_icom_candidate_prefixes})
+    unset(_icom_candidate_gcc CACHE)
+    find_program(_icom_candidate_gcc NAMES ${_icom_candidate_prefix}-gcc)
+    if(NOT _icom_candidate_gcc)
+        string(APPEND _icom_probe_report "  ${_icom_candidate_prefix}-gcc: not found on PATH\n")
+        continue()
+    endif()
+
+    if(ICOM_SKIP_ARMV6_CHECK OR _icom_in_try_compile)
+        set(_icom_toolchain_prefix "${_icom_candidate_prefix}")
+        set(CMAKE_C_COMPILER "${_icom_candidate_gcc}")
+        find_program(CMAKE_CXX_COMPILER NAMES ${_icom_candidate_prefix}-g++)
+        break()
+    endif()
+
+    unset(_icom_candidate_readelf CACHE)
+    find_program(_icom_candidate_readelf NAMES ${_icom_candidate_prefix}-readelf)
+    if(NOT _icom_candidate_readelf)
         message(WARNING
-            "${_icom_toolchain_prefix}-readelf not found -- skipping the "
-            "ARMv6 toolchain capability probe. If intercomd crashes with "
-            "SIGILL on the Pi Zero, see docs/CROSS_COMPILE.md.")
+            "${_icom_candidate_prefix}-readelf not found -- cannot verify this "
+            "candidate's ARMv6 output, accepting it unchecked. If intercomd "
+            "crashes with SIGILL on the Pi Zero, see docs/CROSS_COMPILE.md.")
+        set(_icom_toolchain_prefix "${_icom_candidate_prefix}")
+        set(CMAKE_C_COMPILER "${_icom_candidate_gcc}")
+        find_program(CMAKE_CXX_COMPILER NAMES ${_icom_candidate_prefix}-g++)
+        break()
+    endif()
+
+    set(_icom_probe_dir "${CMAKE_BINARY_DIR}/CMakeFiles/icom_armv6_probe")
+    file(MAKE_DIRECTORY "${_icom_probe_dir}")
+    file(WRITE "${_icom_probe_dir}/probe.c" "int main(void) { return 0; }\n")
+
+    execute_process(
+        COMMAND "${_icom_candidate_gcc}" ${_icom_cpu_flags_list} -o "${_icom_probe_dir}/probe" "${_icom_probe_dir}/probe.c"
+        RESULT_VARIABLE _icom_probe_rc
+        OUTPUT_QUIET ERROR_QUIET
+    )
+    if(NOT _icom_probe_rc EQUAL 0)
+        string(APPEND _icom_probe_report
+            "  ${_icom_candidate_prefix}-gcc: found, but a trivial program with the "
+            "target flags ('${_icom_cpu_flags}') failed to compile/link\n")
+        continue()
+    endif()
+
+    execute_process(
+        COMMAND "${_icom_candidate_readelf}" -A "${_icom_probe_dir}/probe"
+        OUTPUT_VARIABLE _icom_probe_attrs
+        ERROR_QUIET
+    )
+
+    if(_icom_probe_attrs MATCHES "Tag_CPU_arch: v6")
+        set(_icom_toolchain_prefix "${_icom_candidate_prefix}")
+        set(CMAKE_C_COMPILER "${_icom_candidate_gcc}")
+        find_program(CMAKE_CXX_COMPILER NAMES ${_icom_candidate_prefix}-g++)
+        break()
+    else()
+        string(APPEND _icom_probe_report
+            "  ${_icom_candidate_prefix}-gcc: found, but does NOT produce genuine "
+            "ARMv6 binaries -- readelf -A on a trivial program compiled with it "
+            "reports:\n"
+            "${_icom_probe_attrs}\n"
+            "    (This is the known Debian/Ubuntu gcc-arm-linux-gnueabihf "
+            "limitation: crt1.o/libgcc.a built for ARMv7-A only, regardless of "
+            "-march. See docs/CROSS_COMPILE.md.)\n")
+    endif()
+endforeach()
+
+if(NOT CMAKE_C_COMPILER)
+    if(ICOM_TOOLCHAIN_PREFIX)
+        message(FATAL_ERROR
+            "ICOM_TOOLCHAIN_PREFIX=${ICOM_TOOLCHAIN_PREFIX} did not yield a "
+            "working ARMv6 toolchain:\n${_icom_probe_report}\n"
+            "See docs/CROSS_COMPILE.md. To bypass verification entirely (e.g. "
+            "to test this CMake configuration itself, NOT to produce a binary "
+            "for real hardware), reconfigure with -DICOM_SKIP_ARMV6_CHECK=ON.")
+    else()
+        message(FATAL_ERROR
+            "No working ARMv6 toolchain found automatically. Tried:\n"
+            "${_icom_probe_report}\n"
+            "If you have more than one arm-*-gnueabihf toolchain on PATH at "
+            "once (e.g. a distro package installed alongside a purpose-built "
+            "one), that alone shouldn't cause this -- a working one is "
+            "preferred automatically. If NONE of them work, see "
+            "docs/CROSS_COMPILE.md for how to get one. If your toolchain uses "
+            "a prefix this file doesn't try by default, set "
+            "-DICOM_TOOLCHAIN_PREFIX=<prefix>. To bypass verification entirely "
+            "(e.g. to test this CMake configuration itself, NOT to produce a "
+            "binary for real hardware), reconfigure with "
+            "-DICOM_SKIP_ARMV6_CHECK=ON.")
     endif()
 endif()
+
+if(NOT CMAKE_CXX_COMPILER)
+    message(FATAL_ERROR "${_icom_toolchain_prefix}-gcc was found and verified, but ${_icom_toolchain_prefix}-g++ was not.")
+endif()
+
+# Optional: a copy of the Pi's root filesystem (rsynced from a running
+# device, or extracted from a Raspberry Pi OS image) so find_package() etc.
+# can see target headers/libraries such as libgpiod-dev.
+set(ICOM_PI_SYSROOT "" CACHE PATH "Path to a Raspberry Pi OS sysroot (target headers/libs)")
+if(ICOM_PI_SYSROOT)
+    set(CMAKE_SYSROOT "${ICOM_PI_SYSROOT}")
+    set(CMAKE_FIND_ROOT_PATH "${ICOM_PI_SYSROOT}")
+endif()
+
+set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
+set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
+set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
+set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
+
+# pkg-config must resolve .pc files from the sysroot, not the host.
+set(ENV{PKG_CONFIG_LIBDIR} "${ICOM_PI_SYSROOT}/usr/lib/arm-linux-gnueabihf/pkgconfig:${ICOM_PI_SYSROOT}/usr/lib/pkgconfig:${ICOM_PI_SYSROOT}/usr/share/pkgconfig")
+set(ENV{PKG_CONFIG_SYSROOT_DIR} "${ICOM_PI_SYSROOT}")

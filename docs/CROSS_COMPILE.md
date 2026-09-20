@@ -158,9 +158,19 @@ both confirmed by inspection, not guessed:
   including current Bookworm.
 - **It sets `CT_TARGET_VENDOR="rpi"`**, so the built compiler is
   `arm-rpi-linux-gnueabihf-gcc`, not `arm-linux-gnueabihf-gcc`. This
-  project's toolchain file already looks for both names automatically
-  (see its `ICOM_TOOLCHAIN_PREFIX` handling) -- nothing extra to do here,
-  just don't be surprised by the binary names it produces.
+  project's toolchain file tries both names automatically, **and verifies
+  each with the ARMv6 probe before accepting it** -- so if you also still
+  have a distro `gcc-arm-linux-gnueabihf` installed (very likely, if you
+  followed this doc from the top and only later got to Option B), the
+  toolchain file tries that one first, finds it fails the probe, and
+  automatically moves on to your `arm-rpi-linux-gnueabihf` one -- you do
+  not need to uninstall the distro package or pass anything extra for
+  this to work. If auto-detection ever does pick the wrong one of two
+  *working* toolchains (or your build uses a prefix that's neither of the
+  two tried by default), force it explicitly:
+  ```sh
+  cmake --preset pi0-release -DICOM_TOOLCHAIN_PREFIX=arm-rpi-linux-gnueabihf
+  ```
 
 Concrete steps:
 
