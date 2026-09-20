@@ -9,6 +9,7 @@
 #include "icom/core/signal_watcher.hpp"
 #include "icom/gpio/digital_pin.hpp"
 #include "icom/hw/bell_controller.hpp"
+#include "icom/hw/status_led.hpp"
 #include "icom/hw/tcm1171_controller.hpp"
 #include "icom/audio/audio_engine.hpp"
 #include "icom/ipc/control_server.hpp"
@@ -32,6 +33,7 @@ using icom::gpio::Level;
 using icom::gpio::PinConfig;
 using icom::hw::BellController;
 using icom::hw::LineState;
+using icom::hw::StatusLed;
 using icom::hw::Tcm1171Controller;
 using icom::ipc::CommandResult;
 
@@ -145,15 +147,24 @@ int main(int argc, char** argv) {
     // assignments" before touching real hardware. They're also the
     // fallback used when config/icom2000.conf's [gpio.*] sections are
     // absent, so they must stay in sync with that file.
+    //
+    // GPIO23/24/27 are NOT free to assign here: the HiFiBerry Codec Zero
+    // HAT's own spec reserves them for its optional onboard status LEDs
+    // (green=23, red=24) and tactile button (27) -- they're physically
+    // wired on the HAT itself, not a software choice. ring_mode_line/
+    // hook_detect_line used to sit on 27/23 (a collision waiting to
+    // happen once that HAT is actually populated); moved to 5/6 instead.
     unsigned bell_pin_line = 17;
-    unsigned ring_mode_line = 27;
+    unsigned ring_mode_line = 5;
     unsigned polarity_line = 22;
-    unsigned hook_detect_line = 23;
+    unsigned hook_detect_line = 6;
+    unsigned status_led_line = 23; // Codec Zero's own green status LED
     try {
         bell_pin_line = config.get_uint("gpio.bell", "line", bell_pin_line);
         ring_mode_line = config.get_uint("gpio.tcm1171", "ring_mode_line", ring_mode_line);
         polarity_line = config.get_uint("gpio.tcm1171", "polarity_line", polarity_line);
         hook_detect_line = config.get_uint("gpio.tcm1171", "hook_detect_line", hook_detect_line);
+        status_led_line = config.get_uint("gpio.status_led", "line", status_led_line);
     } catch (const std::exception& e) {
         std::cerr << "intercomd: " << opts.config_path << ": invalid GPIO line number (" << e.what()
                    << ")\n";
@@ -201,6 +212,9 @@ int main(int argc, char** argv) {
         },
         loop);
 
+    StatusLed status_led(gpio_backend->request_output(
+        PinConfig{gpio_chip, status_led_line, "icom2000-status-led"}, Level::Low));
+
     auto audio = icom::audio::make_null_audio_engine(stations);
     audio->start();
 
@@ -240,6 +254,11 @@ int main(int argc, char** argv) {
     });
 
     server.start();
+
+    // Visual "the daemon is up and its main loop is about to start"
+    // signal -- fire-and-forget, scheduled on `loop` itself rather than
+    // blocking startup for the ~900ms the full sequence takes.
+    status_led.blink_n_times(3, loop);
 
     kLog.info("ready");
     loop.run();

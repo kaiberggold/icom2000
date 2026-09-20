@@ -1,6 +1,7 @@
 add_library(icom_hw STATIC
     src/bell_controller.cpp
     src/tcm1171_controller.cpp
+    src/status_led.cpp
 )
 add_library(icom::hw ALIAS icom_hw)
 
