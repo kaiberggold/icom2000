@@ -182,6 +182,24 @@ an error and exits nonzero -- if it contains an unrecognized level name or
 malformed component/level pair, rather than silently keeping whatever
 levels components happened to default to.
 
+### Seeing log output while debugging
+
+`--log-console` (`icom::core::set_console_output(true)`) mirrors every
+logged message to stderr, in addition to syslog, at whatever level(s)
+`--log-level`/`ICOM_LOG` already set -- off by default, since a
+systemd-managed run has nothing to gain from it (stderr just lands in the
+journal a second time). It exists for interactive/debugger use, where
+waiting on a second `journalctl -f`/fake-`/dev/log` window is friction a
+plain `std::cerr` line doesn't have: the "Debug intercomd" and "Debug
+intercomd on Pi Zero" `.vscode/launch.json` configs both pass it, and with
+`"externalConsole": false` (already set), VS Code's cppdbg captures that
+stderr straight into the Debug Console. The remote-gdbserver config is the
+one exception worth knowing: gdbserver doesn't pipe the debuggee's stdio
+back over the wire, so that flag (baked into `pi-start-gdbserver`'s ssh
+command in `.vscode/tasks.json`) shows up in the **task's own terminal
+tab** ("pi-start-gdbserver"), not the Debug Console -- still one click away
+in VS Code, just a different panel.
+
 ### Why the registry is a function-local static
 
 `get_logger()`'s registry is a Meyer's singleton (a `static Registry` local

@@ -16,6 +16,7 @@
 #include "icom/core/logger.hpp"
 
 #include <cstdlib>
+#include <sstream>
 
 using namespace icom::core;
 
@@ -118,6 +119,53 @@ void test_configure_levels_from_env_unset_is_a_harmless_noop() {
     CHECK(log.level() == LogLevel::Error); // untouched
 }
 
+// set_console_output() is process-wide, like the level registry -- these
+// leave it back off when done so they don't affect any test that runs
+// after them (there's no ordering guarantee between translation units'
+// test functions beyond what main() below imposes).
+void test_console_output_off_by_default_writes_nothing_to_stderr() {
+    Logger& log = get_logger("test.logger.console.off_by_default");
+    log.set_level(LogLevel::Debug);
+
+    std::ostringstream captured;
+    std::streambuf* real_cerr = std::cerr.rdbuf(captured.rdbuf());
+    log.info("should not appear");
+    std::cerr.rdbuf(real_cerr);
+
+    CHECK(captured.str().empty());
+}
+
+void test_console_output_when_enabled_writes_level_component_and_message() {
+    Logger& log = get_logger("test.logger.console.enabled");
+    log.set_level(LogLevel::Debug);
+    set_console_output(true);
+
+    std::ostringstream captured;
+    std::streambuf* real_cerr = std::cerr.rdbuf(captured.rdbuf());
+    log.warn("something happened");
+    std::cerr.rdbuf(real_cerr);
+    set_console_output(false);
+
+    const std::string out = captured.str();
+    CHECK(out.find("WARN") != std::string::npos);
+    CHECK(out.find("test.logger.console.enabled") != std::string::npos);
+    CHECK(out.find("something happened") != std::string::npos);
+}
+
+void test_console_output_still_respects_the_logger_level() {
+    Logger& log = get_logger("test.logger.console.level_filtered");
+    log.set_level(LogLevel::Error);
+    set_console_output(true);
+
+    std::ostringstream captured;
+    std::streambuf* real_cerr = std::cerr.rdbuf(captured.rdbuf());
+    log.debug("filtered out below the logger's own level");
+    std::cerr.rdbuf(real_cerr);
+    set_console_output(false);
+
+    CHECK(captured.str().empty());
+}
+
 } // namespace
 
 int main() {
@@ -134,6 +182,9 @@ int main() {
     test_configure_levels_level_names_are_case_insensitive();
     test_configure_levels_from_env_reads_named_variable();
     test_configure_levels_from_env_unset_is_a_harmless_noop();
+    test_console_output_off_by_default_writes_nothing_to_stderr();
+    test_console_output_when_enabled_writes_level_component_and_message();
+    test_console_output_still_respects_the_logger_level();
 
     const int failures = icom::testing::failure_count();
     if (failures > 0) {
