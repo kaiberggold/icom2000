@@ -56,6 +56,14 @@ Then `scripts/deploy.sh user@pi-hostname` to copy the binaries over and
 restart the service (`systemd/intercomd.service`,
 `udev/99-icom2000-gpio.rules`).
 
+## VS Code (Windows + WSL2)
+
+The repo ships a `.vscode/` setup (CMake Tools presets, build tasks, and
+`F5` debug configs for both the host build and *live gdbserver debugging
+on the Pi Zero itself*). See
+[`docs/VSCODE_WSL2_SETUP.md`](docs/VSCODE_WSL2_SETUP.md) for the one-time
+setup and how the remote-debug flow works.
+
 ## Layout
 
 ```
@@ -67,10 +75,11 @@ src/ipc/    Unix-socket control protocol + server
 src/app/    intercomd (composition root)
 src/cli/    intercomctl
 tests/      host-only unit tests
-docs/       architecture + cross-compile notes
+docs/       architecture, cross-compile, and VS Code/WSL2 setup notes
 systemd/    intercomd.service
 udev/       GPIO group-permission rule
 scripts/    deploy.sh
+.vscode/    CMake presets wiring, build tasks, F5 debug configs (host + remote gdbserver)
 ```
 
 Full writeup: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).

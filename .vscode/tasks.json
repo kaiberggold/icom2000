@@ -1,0 +1,113 @@
+{
+    "version": "2.0.0",
+    // Prompted once per VS Code session and cached -- see
+    // docs/VSCODE_WSL2_SETUP.md. Duplicated (same ids) in launch.json:
+    // VS Code's cross-file input resolution between tasks.json and
+    // launch.json isn't reliable enough to depend on, so both files carry
+    // their own copy on purpose.
+    "inputs": [
+        {
+            "id": "piHost",
+            "type": "promptString",
+            "description": "Pi Zero hostname or IP (e.g. raspberrypi.local or 192.168.1.42)",
+            "default": "raspberrypi.local"
+        },
+        {
+            "id": "piUser",
+            "type": "promptString",
+            "description": "SSH username on the Pi",
+            "default": "pi"
+        },
+        {
+            "id": "piDeployDir",
+            "type": "promptString",
+            "description": "Writable directory on the Pi to copy the debug binary into",
+            "default": "/home/pi"
+        }
+    ],
+    "tasks": [
+        {
+            "label": "cmake-build-host-dev",
+            "type": "shell",
+            "command": "cmake",
+            "args": ["--build", "--preset", "host-dev"],
+            "group": { "kind": "build", "isDefault": true },
+            "problemMatcher": ["$gcc"]
+        },
+        {
+            "label": "cmake-build-pi0-release",
+            "type": "shell",
+            "command": "cmake",
+            "args": ["--build", "--preset", "pi0-release"],
+            "group": "build",
+            "problemMatcher": ["$gcc"]
+        },
+        {
+            "label": "cmake-build-pi0-debug",
+            "type": "shell",
+            "command": "cmake",
+            "args": ["--build", "--preset", "pi0-debug"],
+            "group": "build",
+            "problemMatcher": ["$gcc"]
+        },
+
+        // --- Debug-on-target chain: build -> copy the exact binary over
+        // -> start gdbserver against it. launch.json's remote debug
+        // config's preLaunchTask is the last task in this chain, which
+        // pulls the earlier two in via dependsOn.
+        {
+            "label": "deploy-debug-binary",
+            "type": "shell",
+            "command": "scp",
+            "args": [
+                "${workspaceFolder}/build/pi0-debug/src/app/intercomd",
+                "${input:piUser}@${input:piHost}:${input:piDeployDir}/intercomd-debug"
+            ],
+            "dependsOn": "cmake-build-pi0-debug",
+            "problemMatcher": []
+        },
+        {
+            "label": "pi-start-gdbserver",
+            "type": "shell",
+            "command": "ssh",
+            "args": [
+                "${input:piUser}@${input:piHost}",
+                // Binds :2345 wide open with no auth -- fine on a home LAN
+                // for a debug session, not something to leave running or
+                // expose beyond it. pkill first so a debug session killed
+                // without detaching (VS Code crash, laptop sleep) doesn't
+                // leave the port stuck for next time.
+                "pkill -f 'gdbserver :2345' 2>/dev/null; cd ${input:piDeployDir} && exec gdbserver :2345 ./intercomd-debug --socket /tmp/icom2000-debug.sock --log-level debug"
+            ],
+            "dependsOn": "deploy-debug-binary",
+            "isBackground": true,
+            "problemMatcher": {
+                // No real "problems" to parse from gdbserver's output --
+                // this pattern is written to never match, so nothing shows
+                // up in the Problems panel. `background` below is what
+                // actually gates the debugger connect on gdbserver being
+                // ready; it scans raw output independently of `pattern`.
+                "pattern": {
+                    "regexp": "^(x^)$",
+                    "file": 1
+                },
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": ".",
+                    "endsPattern": "Listening on port"
+                }
+            }
+        },
+
+        // --- Full production deploy (systemd restart), reusing the
+        // existing script -- unrelated to the debug flow above.
+        {
+            "label": "deploy-production",
+            "type": "shell",
+            "command": "${workspaceFolder}/scripts/deploy.sh",
+            "args": ["${input:piUser}@${input:piHost}"],
+            "dependsOn": "cmake-build-pi0-release",
+            "problemMatcher": []
+        }
+    ]
+}

@@ -1,0 +1,86 @@
+{
+    "version": "0.2.0",
+    // Duplicated from tasks.json on purpose -- see the comment there.
+    "inputs": [
+        {
+            "id": "piHost",
+            "type": "promptString",
+            "description": "Pi Zero hostname or IP (e.g. raspberrypi.local or 192.168.1.42)",
+            "default": "raspberrypi.local"
+        },
+        {
+            "id": "piUser",
+            "type": "promptString",
+            "description": "SSH username on the Pi",
+            "default": "pi"
+        },
+        {
+            "id": "piDeployDir",
+            "type": "promptString",
+            "description": "Writable directory on the Pi to copy the debug binary into",
+            "default": "/home/pi"
+        }
+    ],
+    "configurations": [
+        {
+            "name": "Debug intercomd (host, mock GPIO)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/host-dev/src/app/intercomd",
+            "args": ["--socket", "/tmp/icom2000-debug.sock", "--log-level", "debug"],
+            "cwd": "${workspaceFolder}",
+            "stopAtEntry": false,
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "preLaunchTask": "cmake-build-host-dev",
+            "setupCommands": [
+                { "description": "Enable pretty-printing", "text": "-enable-pretty-printing", "ignoreFailures": true }
+            ]
+        },
+        {
+            // Runs entirely locally (WSL2): builds host-dev, launches
+            // intercomd, and attaches intercomctl to it as a second
+            // process so you can single-step both sides of a control-socket
+            // exchange in one session (Run > Compound Launch also works if
+            // you want them started separately instead).
+            "name": "Debug intercomctl (host, against a running intercomd)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/host-dev/src/cli/intercomctl",
+            "args": ["-s", "/tmp/icom2000-debug.sock", "status"],
+            "cwd": "${workspaceFolder}",
+            "stopAtEntry": false,
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "preLaunchTask": "cmake-build-host-dev",
+            "setupCommands": [
+                { "description": "Enable pretty-printing", "text": "-enable-pretty-printing", "ignoreFailures": true }
+            ]
+        },
+        {
+            // Remote debugging over gdbserver: preLaunchTask builds
+            // pi0-debug, scp's the binary to the Pi, and starts gdbserver
+            // there listening on :2345 (see tasks.json); this config then
+            // points a *local* gdb-multiarch at that port. `program` must
+            // be the exact binary gdbserver is running -- that's what the
+            // build+deploy chain guarantees by always running right before
+            // this connects. See docs/VSCODE_WSL2_SETUP.md before first use
+            // (installing gdbserver and gdb-multiarch, SSH keys, GPIO/audio
+            // group membership on the target for a live-hardware session).
+            "name": "Debug intercomd on Pi Zero (remote gdbserver)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/pi0-debug/src/app/intercomd",
+            "cwd": "${workspaceFolder}",
+            "stopAtEntry": true,
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "miDebuggerPath": "/usr/bin/gdb-multiarch",
+            "miDebuggerServerAddress": "${input:piHost}:2345",
+            "preLaunchTask": "pi-start-gdbserver",
+            "setupCommands": [
+                { "description": "Enable pretty-printing", "text": "-enable-pretty-printing", "ignoreFailures": true }
+            ]
+        }
+    ]
+}
