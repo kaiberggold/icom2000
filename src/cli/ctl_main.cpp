@@ -15,11 +15,11 @@
 
 namespace {
 
-constexpr const char* kDefaultSocketPath = "/run/icom2000.sock";
+constexpr const char* DEFAULT_SOCKET_PATH = "/run/icom2000.sock";
 
-void print_usage(const char* argv0) {
+void printUsage(const char* argv0) {
     std::cerr << "usage: " << argv0 << " [-s SOCKET] COMMAND [ARG ...]\n"
-              << "  -s SOCKET   control socket path (default: " << kDefaultSocketPath
+              << "  -s SOCKET   control socket path (default: " << DEFAULT_SOCKET_PATH
               << ", overridable via ICOM2000_SOCKET)\n"
               << "examples:\n"
               << "  " << argv0 << " bell ring\n"
@@ -29,25 +29,25 @@ void print_usage(const char* argv0) {
 } // namespace
 
 int main(int argc, char** argv) {
-    std::string socket_path = kDefaultSocketPath;
+    std::string socketPath = DEFAULT_SOCKET_PATH;
     if (const char* env = std::getenv("ICOM2000_SOCKET")) {
-        socket_path = env;
+        socketPath = env;
     }
 
-    int arg_index = 1;
+    int argIndex = 1;
     if (argc >= 3 && std::strcmp(argv[1], "-s") == 0) {
-        socket_path = argv[2];
-        arg_index = 3;
+        socketPath = argv[2];
+        argIndex = 3;
     }
 
-    if (arg_index >= argc) {
-        print_usage(argv[0]);
+    if (argIndex >= argc) {
+        printUsage(argv[0]);
         return 2;
     }
 
     std::string request;
-    for (int i = arg_index; i < argc; ++i) {
-        if (i > arg_index) {
+    for (int i = argIndex; i < argc; ++i) {
+        if (i > argIndex) {
             request += ' ';
         }
         request += argv[i];
@@ -62,10 +62,10 @@ int main(int argc, char** argv) {
 
     sockaddr_un addr{};
     addr.sun_family = AF_UNIX;
-    std::strncpy(addr.sun_path, socket_path.c_str(), sizeof(addr.sun_path) - 1);
+    std::strncpy(addr.sun_path, socketPath.c_str(), sizeof(addr.sun_path) - 1);
 
     if (::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
-        std::perror(("connect: " + socket_path).c_str());
+        std::perror(("connect: " + socketPath).c_str());
         ::close(fd);
         return 2;
     }

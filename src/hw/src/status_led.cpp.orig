@@ -26,11 +26,11 @@ void blinkStep(std::shared_ptr<BlinkState> state, core::EventLoop& loop) {
             return; // sequence complete
         }
         loop.addTimer(state->offDuration, /*repeat=*/false,
-                      [state, &loop] { blinkStep(state, loop); });
+                        [state, &loop] { blinkStep(state, loop); });
     } else {
         state->led->on();
         loop.addTimer(state->onDuration, /*repeat=*/false,
-                      [state, &loop] { blinkStep(state, loop); });
+                        [state, &loop] { blinkStep(state, loop); });
     }
 }
 
@@ -53,8 +53,8 @@ void StatusLed::off() {
 bool StatusLed::isOn() const { return on_; }
 
 void StatusLed::blinkNTimes(unsigned times, core::EventLoop& loop,
-                            std::chrono::milliseconds onDuration,
-                            std::chrono::milliseconds offDuration) {
+                               std::chrono::milliseconds onDuration,
+                               std::chrono::milliseconds offDuration) {
     if (times == 0) {
         return;
     }

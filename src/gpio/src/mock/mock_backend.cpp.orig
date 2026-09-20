@@ -83,13 +83,13 @@ core::Logger& log = core::getLogger("gpio.mock");
 
 std::unique_ptr<OutputPin> MockBackend::requestOutput(const PinConfig& config, Level initial) {
     log.debug("requesting output " + config.chip + ":" + std::to_string(config.line) + " (" +
-              config.consumer + ")");
+               config.consumer + ")");
     return std::make_unique<MockOutputPin>(config, initial);
 }
 
 std::unique_ptr<InputPin> MockBackend::requestInput(const PinConfig& config, Edge /*edge*/) {
     log.debug("requesting input " + config.chip + ":" + std::to_string(config.line) + " (" +
-              config.consumer + ")");
+               config.consumer + ")");
     return std::make_unique<MockInputPin>(config);
 }
 

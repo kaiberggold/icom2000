@@ -13,12 +13,12 @@ namespace {
 
 void testParseReadsSectionsAndKeys() {
     const auto result = File::parse(
-                            "[daemon]\n"
-                            "socket_path = /run/icom2000.sock\n"
-                            "# a comment, ignored\n"
-                            "\n"
-                            "[gpio.bell]\n"
-                            "line = 17\n");
+        "[daemon]\n"
+        "socket_path = /run/icom2000.sock\n"
+        "# a comment, ignored\n"
+        "\n"
+        "[gpio.bell]\n"
+        "line = 17\n");
 
     CHECK(result.ok);
     CHECK(result.config.get("daemon", "socket_path", "") == "/run/icom2000.sock");
@@ -102,12 +102,12 @@ void testStationRegistryFallsBackToDoorAndInsideWhenUnconfigured() {
 
 void testStationRegistryHonorsExplicitConfig() {
     const auto result = File::parse(
-                            "[stations]\n"
-                            "names = door\n"
-                            "\n"
-                            "[station.door]\n"
-                            "capture_device = custom_capture\n"
-                            "playback_device = custom_playback\n");
+        "[stations]\n"
+        "names = door\n"
+        "\n"
+        "[station.door]\n"
+        "capture_device = custom_capture\n"
+        "playback_device = custom_playback\n");
     CHECK(result.ok);
 
     const StationRegistry stations(result.config);

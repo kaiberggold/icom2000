@@ -21,7 +21,7 @@ public:
         // mainly so that fact is visible/testable before one exists.
         for (const auto& station : stations_) {
             log.debug("station \"" + station.name + "\" would open capture=" + station.captureDevice +
-                      ", playback=" + station.playbackDevice);
+                       ", playback=" + station.playbackDevice);
         }
         log.warn("NullAudioEngine::start() -- no audio path implemented yet");
         running_ = true;

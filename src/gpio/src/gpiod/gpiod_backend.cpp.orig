@@ -51,7 +51,7 @@ public:
 
     void write(Level level) override {
         request_.set_value(line_, level == Level::HIGH ? ::gpiod::line::value::ACTIVE
-                           : ::gpiod::line::value::INACTIVE);
+                                                         : ::gpiod::line::value::INACTIVE);
         driven_ = level;
     }
 
@@ -101,16 +101,16 @@ std::unique_ptr<OutputPin> GpiodBackend::requestOutput(const PinConfig& config, 
 
     ::gpiod::line_settings settings;
     settings.set_direction(::gpiod::line::direction::OUTPUT)
-    .set_output_value(initial == Level::HIGH ? ::gpiod::line::value::ACTIVE
-                      : ::gpiod::line::value::INACTIVE);
+        .set_output_value(initial == Level::HIGH ? ::gpiod::line::value::ACTIVE
+                                                   : ::gpiod::line::value::INACTIVE);
 
     auto request = chip.prepare_request()
-                   .set_consumer(config.consumer)
-                   .add_line_settings(config.line, settings)
-                   .do_request();
+                       .set_consumer(config.consumer)
+                       .add_line_settings(config.line, settings)
+                       .do_request();
 
     log.info("requested output " + config.chip + ":" + std::to_string(config.line) + " (" +
-             config.consumer + ")");
+              config.consumer + ")");
     return std::make_unique<GpiodOutputPin>(std::move(request), config.line, initial);
 }
 
@@ -124,12 +124,12 @@ std::unique_ptr<InputPin> GpiodBackend::requestInput(const PinConfig& config, Ed
     settings.set_direction(::gpiod::line::direction::INPUT).set_edge_detection(toGpiodEdge(edge));
 
     auto request = chip.prepare_request()
-                   .set_consumer(config.consumer)
-                   .add_line_settings(config.line, settings)
-                   .do_request();
+                       .set_consumer(config.consumer)
+                       .add_line_settings(config.line, settings)
+                       .do_request();
 
     log.info("requested input " + config.chip + ":" + std::to_string(config.line) + " (" +
-             config.consumer + ")");
+              config.consumer + ")");
     return std::make_unique<GpiodInputPin>(std::move(request), config.line);
 }
 

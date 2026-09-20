@@ -39,7 +39,7 @@ struct EventLoop::Impl {
     }
 
     void removeFdLocked(int fd) {
-        std::erase_if(pollfds, [fd](const pollfd & p) { return p.fd == fd; });
+        std::erase_if(pollfds, [fd](const pollfd& p) { return p.fd == fd; });
         fdCallbacks.erase(fd);
     }
 };
@@ -73,7 +73,7 @@ void EventLoop::addFd(int fd, short events, FdCallback callback) {
 void EventLoop::removeFd(int fd) { impl_->removeFdLocked(fd); }
 
 EventLoop::TimerId EventLoop::addTimer(std::chrono::milliseconds interval, bool repeat,
-                                       TimerCallback callback) {
+                                         TimerCallback callback) {
     const int fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK);
     if (fd < 0) {
         throwErrno("timerfd_create() failed");
@@ -105,7 +105,7 @@ EventLoop::TimerId EventLoop::addTimer(std::chrono::milliseconds interval, bool 
         if (!repeat) {
             removeFd(fd);
             ::close(fd);
-            std::erase_if(impl_->timerFdById, [fd](const auto & kv) { return kv.second == fd; });
+            std::erase_if(impl_->timerFdById, [fd](const auto& kv) { return kv.second == fd; });
         }
     });
 

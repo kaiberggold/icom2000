@@ -138,7 +138,7 @@ std::vector<std::string> File::getList(std::string_view section, std::string_vie
     while (pos <= value.size()) {
         const std::size_t comma = value.find(',', pos);
         const std::string_view item = trim(std::string_view(value).substr(
-                                               pos, comma == std::string::npos ? std::string_view::npos : comma - pos));
+            pos, comma == std::string::npos ? std::string_view::npos : comma - pos));
         pos = (comma == std::string::npos) ? value.size() + 1 : comma + 1;
         if (!item.empty()) {
             items.emplace_back(item);

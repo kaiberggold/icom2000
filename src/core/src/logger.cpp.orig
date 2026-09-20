@@ -51,7 +51,7 @@ std::string_view trim(std::string_view s) {
 std::optional<LogLevel> parseLevel(std::string_view text) {
     std::string lower(trim(text));
     std::transform(lower.begin(), lower.end(), lower.begin(),
-    [](unsigned char c) { return std::tolower(c); });
+                    [](unsigned char c) { return std::tolower(c); });
     if (lower == "debug") return LogLevel::DEBUG;
     if (lower == "info") return LogLevel::INFO;
     if (lower == "warn" || lower == "warning") return LogLevel::WARN;
@@ -98,7 +98,7 @@ void Logger::log(LogLevel level, std::string_view message) const {
         // after every individual `<<` by default, so writing the pieces
         // separately would let concurrent loggers' lines interleave.
         std::cerr << (std::string(levelName(level)) + " [" + component_ + "] " + std::string(message))
-                  << std::endl;
+                   << std::endl;
     }
 }
 
@@ -108,9 +108,9 @@ Logger& getLogger(std::string_view component) {
     auto it = r.loggers.find(std::string(component));
     if (it == r.loggers.end()) {
         it = r.loggers
-             .try_emplace(std::string(component), std::string(component),
-                          r.defaultLevel.load(std::memory_order_relaxed))
-             .first;
+                 .try_emplace(std::string(component), std::string(component),
+                              r.defaultLevel.load(std::memory_order_relaxed))
+                 .first;
     }
     return it->second;
 }
@@ -127,8 +127,8 @@ bool configureLevels(std::string_view spec) {
     while (pos <= spec.size()) {
         const std::size_t comma = spec.find(',', pos);
         const std::string_view token = trim(spec.substr(pos, comma == std::string_view::npos
-                                            ? std::string_view::npos
-                                            : comma - pos));
+                                                                  ? std::string_view::npos
+                                                                  : comma - pos));
         pos = (comma == std::string_view::npos) ? spec.size() + 1 : comma + 1;
 
         if (token.empty()) {
@@ -163,7 +163,7 @@ bool configureLevels(std::string_view spec) {
         for (auto& [name, logger] : r.loggers) {
             const bool hasOverride =
                 std::any_of(overrides.begin(), overrides.end(),
-            [&](const auto & o) { return o.first == name; });
+                            [&](const auto& o) { return o.first == name; });
             if (!hasOverride) {
                 logger.setLevel(*defaultLevel);
             }

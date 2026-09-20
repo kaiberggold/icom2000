@@ -22,7 +22,7 @@ StationRegistry::StationRegistry(const File& config) {
 
 const Station* StationRegistry::find(std::string_view name) const {
     const auto it = std::find_if(stations_.begin(), stations_.end(),
-    [&](const Station & s) { return s.name == name; });
+                                  [&](const Station& s) { return s.name == name; });
     return it == stations_.end() ? nullptr : &*it;
 }
 

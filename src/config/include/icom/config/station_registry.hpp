@@ -14,17 +14,17 @@ namespace icom::config {
 // the config file it's built from) should ever need to know how "door" or
 // "inside" map onto the codec's channels.
 //
-// `capture_device`/`playback_device` are named ALSA PCM devices, defined
+// `captureDevice`/`playbackDevice` are named ALSA PCM devices, defined
 // in config/asound.conf (installed as /etc/asound.conf) -- never a raw
-// sound-card device string. Not consumed by anything yet (AudioEngine is
+// sound-card device string. Not consumed by anything yet (Engine is
 // still a stub, see docs/ARCHITECTURE.md "Audio boundary"), but every
 // station config already carries these names so a future real
 // implementation has a place to get a device name from other than
 // inventing one inline.
-struct StationConfig {
+struct Station {
     std::string name;
-    std::string capture_device;
-    std::string playback_device;
+    std::string captureDevice;
+    std::string playbackDevice;
 };
 
 class StationRegistry {
@@ -33,16 +33,16 @@ public:
     // listed name. Missing pieces fall back to defaults rather than
     // failing: an absent [stations] section falls back to the shipped
     // config/icom2000.conf's station list ("door", "inside"), and a
-    // station section missing capture_device/playback_device falls back
+    // station section missing captureDevice/playbackDevice falls back
     // to "icom_<name>_capture"/"icom_<name>_playback" -- so behavior is
     // identical whether or not a config file happens to be installed.
-    explicit StationRegistry(const ConfigFile& config);
+    explicit StationRegistry(const File& config);
 
-    const StationConfig* find(std::string_view name) const;
-    const std::vector<StationConfig>& all() const { return stations_; }
+    const Station* find(std::string_view name) const;
+    const std::vector<Station>& all() const { return stations_; }
 
 private:
-    std::vector<StationConfig> stations_;
+    std::vector<Station> stations_;
 };
 
 } // namespace icom::config

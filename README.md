@@ -83,10 +83,10 @@ setup and how the remote-debug flow works.
 
 ```
 src/core/   reactor (EventLoop), signal handling, logging
-src/config/ ConfigFile (INI-style reader), StationRegistry
+src/config/ File (INI-style config reader), StationRegistry
 src/gpio/   OutputPin/InputPin interfaces + mock and libgpiod backends
 src/hw/     BellController, Tcm1171Controller
-src/audio/  AudioEngine interface (stubbed -- see docs/ARCHITECTURE.md)
+src/audio/  Engine interface (stubbed -- see docs/ARCHITECTURE.md)
 src/ipc/    Unix-socket control protocol + server
 src/app/    intercomd (composition root)
 src/cli/    intercomctl

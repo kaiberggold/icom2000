@@ -28,9 +28,9 @@ Tcm1171Controller::Tcm1171Controller(Pins pins, core::EventLoop& loop, StateChan
     if (fd >= 0) {
         loop_.addFd(fd, POLLIN, [this](short) {
             pins_.hookDetect->consumeEvents(
-            [this](gpio::Level level, std::chrono::steady_clock::time_point at) {
-                onHookEdge(level, at);
-            });
+                [this](gpio::Level level, std::chrono::steady_clock::time_point at) {
+                    onHookEdge(level, at);
+                });
         });
     } else {
         log.warn("hook_detect pin has no edge support; hook state will never update");

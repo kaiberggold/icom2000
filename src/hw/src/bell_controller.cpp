@@ -4,30 +4,30 @@
 namespace icom::hw {
 
 namespace {
-core::Logger& kLog = core::get_logger("hw.bell");
+core::Logger& log = core::getLogger("hw.bell");
 } // namespace
 
 BellController::BellController(std::unique_ptr<gpio::OutputPin> pin) : pin_(std::move(pin)) {
-    pin_->write(gpio::Level::Low);
+    pin_->write(gpio::Level::LOW);
 }
 
 void BellController::ring() {
-    pin_->write(gpio::Level::High);
+    pin_->write(gpio::Level::HIGH);
     ringing_ = true;
-    kLog.info("ringing");
+    log.info("ringing");
 }
 
 void BellController::silence() {
-    pin_->write(gpio::Level::Low);
+    pin_->write(gpio::Level::LOW);
     ringing_ = false;
-    kLog.info("silenced");
+    log.info("silenced");
 }
 
-bool BellController::is_ringing() const { return ringing_; }
+bool BellController::isRinging() const { return ringing_; }
 
-void BellController::ring_for(std::chrono::milliseconds duration, core::EventLoop& loop) {
+void BellController::ringFor(std::chrono::milliseconds duration, core::EventLoop& loop) {
     ring();
-    loop.add_timer(duration, /*repeat=*/false, [this] { silence(); });
+    loop.addTimer(duration, /*repeat=*/false, [this] { silence(); });
 }
 
 } // namespace icom::hw

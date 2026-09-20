@@ -78,20 +78,20 @@ Options parseArgs(int argc, char** argv) {
             opts.logConsole = true;
         } else if (arg == "--help") {
             std::cout
-                    << "usage: intercomd [--config PATH] [--socket PATH] [--gpio-chip NAME]\n"
-                    << "                 [--log-level SPEC] [--log-console]\n"
-                    << "  --config PATH   config file (default: /etc/icom2000.conf; see config/icom2000.conf\n"
-                    << "                  in the repo for the shipped defaults and format). --socket and\n"
-                    << "                  --gpio-chip, if given, override that file's [daemon] section.\n"
-                    << "  SPEC: a default level and/or per-component overrides, e.g.\n"
-                    << "        \"warn,gpio.mock=debug,ipc.control_server=debug\"\n"
-                    << "        (also settable via the ICOM_LOG environment variable;\n"
-                    << "        --log-level takes precedence when both are given)\n"
-                    << "  --log-console   also print log messages to stderr, at the level(s) above\n"
-                    << "                  (in addition to syslog, not instead of it) -- useful when\n"
-                    << "                  running interactively or under a debugger; not needed for a\n"
-                    << "                  systemd-managed run, since journalctl already has everything\n"
-                    << "                  syslog gets\n";
+                << "usage: intercomd [--config PATH] [--socket PATH] [--gpio-chip NAME]\n"
+                << "                 [--log-level SPEC] [--log-console]\n"
+                << "  --config PATH   config file (default: /etc/icom2000.conf; see config/icom2000.conf\n"
+                << "                  in the repo for the shipped defaults and format). --socket and\n"
+                << "                  --gpio-chip, if given, override that file's [daemon] section.\n"
+                << "  SPEC: a default level and/or per-component overrides, e.g.\n"
+                << "        \"warn,gpio.mock=debug,ipc.control_server=debug\"\n"
+                << "        (also settable via the ICOM_LOG environment variable;\n"
+                << "        --log-level takes precedence when both are given)\n"
+                << "  --log-console   also print log messages to stderr, at the level(s) above\n"
+                << "                  (in addition to syslog, not instead of it) -- useful when\n"
+                << "                  running interactively or under a debugger; not needed for a\n"
+                << "                  systemd-managed run, since journalctl already has everything\n"
+                << "                  syslog gets\n";
             std::exit(0);
         }
     }
@@ -105,8 +105,8 @@ icom::core::Logger& log = icom::core::getLogger("app");
 int main(int argc, char** argv) {
 
     icom::core::initSyslog("icom2000");
-    log.info("Daemon started");
-
+     log.info("Daemon started");
+    
     const Options opts = parseArgs(argc, argv);
 
     if (opts.logConsole) {
@@ -169,7 +169,7 @@ int main(int argc, char** argv) {
         statusLedLine = config.getUint("gpio.status_led", "line", statusLedLine);
     } catch (const std::exception& e) {
         std::cerr << "intercomd: " << opts.configPath << ": invalid GPIO line number (" << e.what()
-                  << ")\n";
+                   << ")\n";
         return 1;
     }
 
@@ -185,11 +185,11 @@ int main(int argc, char** argv) {
     const icom::config::StationRegistry stations(config);
     for (const auto& station : stations.all()) {
         log.info("station \"" + station.name + "\": capture=" + station.captureDevice +
-                 ", playback=" + station.playbackDevice);
+                   ", playback=" + station.playbackDevice);
     }
 
     log.info("starting (socket=" + socketPath + ", gpio-chip=" + gpioChip +
-             ", config=" + opts.configPath + ")");
+               ", config=" + opts.configPath + ")");
 
     EventLoop loop;
 
@@ -204,18 +204,18 @@ int main(int argc, char** argv) {
         gpioBackend->requestOutput(PinConfig{gpioChip, bellPinLine, "icom2000-bell"}, Level::LOW));
 
     Tcm1171Controller line(
-    Tcm1171Controller::Pins{
-        gpioBackend->requestOutput(PinConfig{gpioChip, ringModeLine, "icom2000-tcm1171-rm"},
-        Level::LOW),
-        gpioBackend->requestOutput(PinConfig{gpioChip, polarityLine, "icom2000-tcm1171-fr"},
-        Level::LOW),
-        gpioBackend->requestInput(PinConfig{gpioChip, hookDetectLine, "icom2000-tcm1171-hook"},
-        Edge::BOTH),
-    },
-    loop);
+        Tcm1171Controller::Pins{
+            gpioBackend->requestOutput(PinConfig{gpioChip, ringModeLine, "icom2000-tcm1171-rm"},
+                                          Level::LOW),
+            gpioBackend->requestOutput(PinConfig{gpioChip, polarityLine, "icom2000-tcm1171-fr"},
+                                          Level::LOW),
+            gpioBackend->requestInput(PinConfig{gpioChip, hookDetectLine, "icom2000-tcm1171-hook"},
+                                         Edge::BOTH),
+        },
+        loop);
 
     StatusLed status_led(gpioBackend->requestOutput(
-                             PinConfig{gpioChip, statusLedLine, "icom2000-status-led"}, Level::LOW));
+        PinConfig{gpioChip, statusLedLine, "icom2000-status-led"}, Level::LOW));
 
     auto audio = icom::audio::makeNullEngine(stations);
     audio->start();
@@ -251,8 +251,8 @@ int main(int argc, char** argv) {
 
     server.registerCommand("STATUS", [&](const auto&) {
         return CommandResult::success(std::string("line=") + icom::hw::toString(line.state()) +
-                                      " bell=" + (bell.isRinging() ? "ringing" : "silent") +
-                                      " audio=" + (audio->isRunning() ? "up" : "down"));
+                                       " bell=" + (bell.isRinging() ? "ringing" : "silent") +
+                                       " audio=" + (audio->isRunning() ? "up" : "down"));
     });
 
     server.start();

@@ -23,7 +23,7 @@ std::vector<std::string> tokenize(std::string_view line) {
     return tokens;
 }
 
-std::string format_response(const CommandResult& result) {
+std::string formatResponse(const CommandResult& result) {
     return (result.ok ? "OK " : "ERR ") + result.message + "\n";
 }
 

@@ -25,22 +25,22 @@ connecting real hardware.
 ```
 src/core/   EventLoop (reactor), SignalWatcher, logging -- no hardware
             or GPIO knowledge at all.
-src/config/ ConfigFile (INI-style reader) + StationRegistry -- see
+src/config/ File (INI-style reader) + StationRegistry -- see
             "Configuration" below. No hardware knowledge either.
-src/gpio/   OutputPin/InputPin/GpioBackend interfaces, plus two
+src/gpio/   OutputPin/InputPin/Backend interfaces, plus two
             implementations: MockBackend (in-process, for host dev/tests)
             and GpiodBackend (libgpiod, for target hardware).
 src/hw/     Domain logic built only on the gpio interfaces: BellController
             (the simple end-to-end example) and Tcm1171Controller (the
             stateful, event-driven example).
-src/audio/  AudioEngine interface + a no-op NullAudioEngine. Real ALSA
+src/audio/  Engine interface + a no-op NullEngine. Real ALSA
             code is a later pass -- see "Audio boundary" below.
 src/ipc/    The Unix-socket control protocol and its server.
 src/app/    daemon_main.cpp -- the composition root. Everything above is
             constructed and wired together here; nothing else in the tree
             knows this file exists.
 src/cli/    intercomctl -- a thin client over src/ipc's protocol.
-tests/      Host-only unit tests (EventLoop + MockBackend + ConfigFile +
+tests/      Host-only unit tests (EventLoop + MockBackend + File +
             the architecture-invariants guard script, see "Testing").
 config/     Deployment configuration -- see "Configuration" below.
 ```
@@ -103,7 +103,7 @@ This single-thread-plus-reactor model is a deliberate fit for a Pi Zero:
 one ARM1176JZF-S core at ~1GHz has nothing to gain from a thread pool for
 this workload, and a single thread means no locking anywhere in
 `src/core`, `src/gpio`, `src/hw`, or `src/ipc` -- the only place this
-project should ever need a mutex is inside a future real `AudioEngine`,
+project should ever need a mutex is inside a future real `Engine`,
 which explicitly does *not* share the reactor thread (see below).
 
 ### OS interaction, concretely
@@ -152,13 +152,13 @@ Each `.cpp` file that logs declares its own logger once, at file scope:
 
 ```cpp
 namespace {
-icom::core::Logger& kLog = icom::core::get_logger("hw.bell");
+icom::core::Logger& log = icom::core::getLogger("hw.bell");
 } // namespace
 ```
 
-and then just calls `kLog.debug(...)`/`.info(...)`/`.warn(...)`/`.error(...)`
+and then just calls `log.debug(...)`/`.info(...)`/`.warn(...)`/`.error(...)`
 wherever it wants -- that's the whole mechanism for "insert log output
-where I want": add a `kLog` line if the file doesn't have one yet
+where I want": add a `log` line if the file doesn't have one yet
 (matching the dotted `module.submodule` naming already in use -- see any
 existing `.cpp` under `src/` for the pattern), then log. Current
 components: `core.event_loop`, `gpio.mock`, `gpio.gpiod`, `hw.bell`,
@@ -166,7 +166,7 @@ components: `core.event_loop`, `gpio.mock`, `gpio.gpiod`, `hw.bell`,
 
 Levels are set at startup, per component, via the `ICOM_LOG` environment
 variable or `intercomd --log-level`, both parsed by the same
-`configure_levels()`:
+`configureLevels()`:
 
 ```
 ICOM_LOG="warn,gpio.mock=debug,ipc.control_server=debug" intercomd
@@ -184,7 +184,7 @@ levels components happened to default to.
 
 ### Seeing log output while debugging
 
-`--log-console` (`icom::core::set_console_output(true)`) mirrors every
+`--log-console` (`icom::core::setConsoleOutput(true)`) mirrors every
 logged message to stderr, in addition to syslog, at whatever level(s)
 `--log-level`/`ICOM_LOG` already set -- off by default, since a
 systemd-managed run has nothing to gain from it (stderr just lands in the
@@ -202,13 +202,13 @@ in VS Code, just a different panel.
 
 ### Why the registry is a function-local static
 
-`get_logger()`'s registry is a Meyer's singleton (a `static Registry` local
+`getLogger()`'s registry is a Meyer's singleton (a `static Registry` local
 to a function), not a plain namespace-scope global. Several `.cpp` files
-declare their `Logger& kLog` as a namespace-scope variable, which runs
+declare their `Logger& log` as a namespace-scope variable, which runs
 during that translation unit's *dynamic initialization* -- and the C++
 standard leaves the relative order of dynamic initialization across
 different translation units unspecified. A plain global registry could
-easily end up read by one TU's `kLog` initializer before another TU's
+easily end up read by one TU's `log` initializer before another TU's
 initializer had constructed it. A function-local static sidesteps the
 question entirely: it's guaranteed to be constructed on its first use, no
 matter which TU that first use comes from.
@@ -216,7 +216,7 @@ matter which TU that first use comes from.
 ### Logging tests
 
 `tests/logger_tests.cpp` covers the registry (identity, per-component
-levels) and `configure_levels()`'s parsing, including that a rejected spec
+levels) and `configureLevels()`'s parsing, including that a rejected spec
 changes nothing. It does not check that a message actually reaches
 `syslog` -- that was instead verified manually against this exact build,
 by standing up a throwaway `AF_UNIX SOCK_DGRAM` listener at `/dev/log` and
@@ -227,7 +227,7 @@ decades-stable POSIX API).
 
 ## GPIO abstraction
 
-`icom::gpio::OutputPin` / `InputPin` / `GpioBackend`
+`icom::gpio::OutputPin` / `InputPin` / `Backend`
 (`src/gpio/include/icom/gpio/digital_pin.hpp`) are the only thing
 `src/hw` and `src/app` are allowed to depend on for GPIO access -- neither
 includes `<gpiod.hpp>` or knows libgpiod exists. Two backends implement
@@ -235,7 +235,7 @@ that interface:
 
 - **MockBackend** (`src/gpio/src/mock`): in-process, backed by an
   `eventfd` per input pin so it plugs into the same `EventLoop` an fd from
-  a real chip would. `inject_mock_edge()` lets tests (and a future
+  a real chip would. `injectMockEdge()` lets tests (and a future
   software-loopback demo mode) simulate a physical edge. This is what the
   `host-dev` CMake preset builds, and what `tests/` link against -- no
   GPIO chip, no root, no target hardware needed to develop the control
@@ -257,7 +257,7 @@ that interface:
   is correct C++ against the real API, not that it behaves correctly
   against a real GPIO chip.
 
-Which backend `make_default_backend()` returns is a compile-time choice
+Which backend `makeDefaultBackend()` returns is a compile-time choice
 (`ICOM_WITH_LIBGPIOD`), not a runtime one -- there is no reason a Pi
 binary should carry mock code or a dev-host binary should require
 libgpiod headers to exist.
@@ -266,15 +266,15 @@ libgpiod headers to exist.
 
 - **`BellController`** (`src/hw`) is the simple, fully-implemented example
   the "one working digital pin" requirement asked for: one `OutputPin`,
-  `ring()`/`silence()`/`ring_for(duration, loop)`. Read this one first.
+  `ring()`/`silence()`/`ringFor(duration, loop)`. Read this one first.
 - **`Tcm1171Controller`** is the event-driven example: it owns two output
   pins (ring-mode enable, line polarity) and one input pin (hook detect),
   registers the input's edge fd with the `EventLoop` in its constructor,
   and exposes `LineState` (`OnHook`/`Ringing`/`OffHook`/`Fault`) plus
-  `start_ringing()`/`stop_ringing()`.
+  `startRinging()`/`stopRinging()`.
 - **`StatusLed`** drives the Codec Zero HAT's own onboard green status LED
   (GPIO23 -- see "Pin assignments" below for why that specific line).
-  `blink_n_times()` is its one interesting method: schedules `n` on/off
+  `blinkNTimes()` is its one interesting method: schedules `n` on/off
   cycles on the `EventLoop` and returns immediately (a self-rescheduling
   chain of one-shot timers, not a blocking sleep loop), so it's safe to
   call right before `loop.run()` without delaying startup -- `daemon_main`
@@ -303,8 +303,8 @@ hardware:
 2. Confirm how hook state reaches a GPIO at all. The TCM1171 itself
    exposes loop current as an *analog* signal (IL); on-hook/off-hook
    detection normally needs an external comparator or optocoupler between
-   that pin and whatever GPIO `Tcm1171Controller::Pins::hook_detect`
-   ends up wired to. `on_hook_edge()`'s polarity (`High` == off-hook) is a
+   that pin and whatever GPIO `Tcm1171Controller::Pins::hookDetect`
+   ends up wired to. `onHookEdge()`'s polarity (`High` == off-hook) is a
    placeholder guess, not a measured fact.
 3. Update the `[gpio.*]` sections in `config/icom2000.conf` (and its
    installed copy, `/etc/icom2000.conf`) -- see "Configuration" below.
@@ -312,9 +312,9 @@ hardware:
 
 ## Audio boundary
 
-Out of scope for this pass by design. `icom::audio::AudioEngine`
+Out of scope for this pass by design. `icom::audio::Engine`
 (`src/audio/include/icom/audio/audio_engine.hpp`) defines the seam a real
-implementation plugs into; `NullAudioEngine` satisfies it today so the
+implementation plugs into; `NullEngine` satisfies it today so the
 daemon builds, runs, and reports `audio=down`... `audio=up`-but-silent
 honestly via `intercomctl status` without every other component needing
 to special-case "audio doesn't exist yet".
@@ -329,8 +329,8 @@ thread(s), talking to the reactor thread via a lock-free queue or a
 handful of atomics, not shared mutable state.
 
 It should also **not** open a sound-card device string itself.
-`make_null_audio_engine()` already takes a `config::StationRegistry`
-(`src/config`, see "Configuration" below) and every `StationConfig` in it
+`makeNullEngine()` already takes a `config::StationRegistry`
+(`src/config`, see "Configuration" below) and every `Station` in it
 carries a named ALSA PCM device per station, resolved from
 `config/asound.conf` -- a real engine's constructor signature has nowhere
 left to reach for a raw device string, only names the registry handed it.
@@ -338,19 +338,19 @@ See "Architecture invariants" for how that's enforced, not just requested.
 
 ## Configuration
 
-`icom::config::ConfigFile` (`src/config/include/icom/config/config_file.hpp`)
+`icom::config::File` (`src/config/include/icom/config/config_file.hpp`)
 is a hand-rolled reader for a small INI-style format -- `[section]`
 headers, `key = value` lines, `#`/`;` comments -- backing
 `config/icom2000.conf` (installed as `/etc/icom2000.conf`). Same
-philosophy as the logging module's `configure_levels()`: no third-party
+philosophy as the logging module's `configureLevels()`: no third-party
 YAML/JSON library, because the actual configuration surface here is small
 and flat, and results (not exceptions) cross the load/parse boundary
 because this reads content a human edits by hand, where a typo should
 become a clean startup error, not a stack unwind.
 
-`ConfigFile::load()` distinguishes two failure shapes on purpose:
+`File::load()` distinguishes two failure shapes on purpose:
 
-- **File missing** (`file_found = false`, `ok = true`): not an error.
+- **File missing** (`fileFound = false`, `ok = true`): not an error.
   `daemon_main.cpp` logs a warning and falls back to built-in defaults
   that exactly match the shipped `config/icom2000.conf` -- so a fresh
   checkout with nothing installed at `/etc/icom2000.conf` behaves
@@ -374,10 +374,10 @@ is the **one place** a station name is tied to a physical/logical audio
 channel: `config/icom2000.conf`'s `[stations]` (the name list) and
 `[station.<name>]` (that station's named capture/playback devices,
 defined in `config/asound.conf`) sections. Everything else -- today, just
-the `AudioEngine` factory; later, whatever actually streams audio --
+the `Engine` factory; later, whatever actually streams audio --
 refers to stations as `"door"`/`"inside"` and nothing else. No code
 anywhere works with "left"/"right" or a channel index; there wouldn't
-even be a natural place to put that, since a `StationConfig` only exposes
+even be a natural place to put that, since a `Station` only exposes
 a name and two device-name strings.
 
 This is what makes the eventual network extension (a third,
@@ -392,7 +392,7 @@ by name needs to change, because nothing ever encoded an assumption about
 ### Named ALSA devices
 
 `config/asound.conf` (installed as `/etc/asound.conf`) defines the PCM
-devices every `StationConfig` names: `icom_door_capture`,
+devices every `Station` names: `icom_door_capture`,
 `icom_door_playback`, `icom_inside_capture`, `icom_inside_playback`. Today
 they're plain 1:1 aliases onto the one physical card (the file has the
 full rationale and caveats) -- what matters architecturally is that this
@@ -454,7 +454,7 @@ test (`architecture_invariants`) so it can't silently bit-rot:
    both, because it never includes anything that would tell it.
 4. **Stations are names, not channels.** Not independently `grep`-able
    (there is no "channel index" type left in the codebase to search for),
-   but see "Stations" above -- `StationConfig` structurally has no room
+   but see "Stations" above -- `Station` structurally has no room
    for one.
 
 There is deliberately no fifth invariant abstracting "analog vs. digital
@@ -473,10 +473,10 @@ request:   "<COMMAND> [ARG ...]\n"
 response:  "OK [message]\n"   or   "ERR <message>\n"
 ```
 
-Commands are registered by name (`register_command()`) rather than
+Commands are registered by name (`registerCommand()`) rather than
 switched on inside `ControlServer` -- `daemon_main.cpp` is the only place
 that knows `BELL`, `LINE`, `STATUS`, and `PING` exist. Adding a command
-later means adding a `register_command()` call at the wiring site, not
+later means adding a `registerCommand()` call at the wiring site, not
 touching `src/ipc` at all. Command names are matched case-insensitively;
 so are the keyword arguments the currently-registered handlers use (`ON`/
 `OFF`/`RING`, `STATUS`) -- each handler is responsible for its own
@@ -508,8 +508,8 @@ Four `ctest` cases: `icom_tests` covers `MockBackend` output/input
 behavior, and that an injected mock edge reaches an `EventLoop` callback
 end-to-end -- i.e. the same path `Tcm1171Controller` depends on in
 production. `icom_logger_tests` covers the logging registry and
-`configure_levels()` parsing (see "Logging" above). `icom_config_tests`
-covers `ConfigFile` parsing (including the missing-vs-malformed-file
+`configureLevels()` parsing (see "Logging" above). `icom_config_tests`
+covers `File` parsing (including the missing-vs-malformed-file
 distinction) and `StationRegistry`'s defaults/overrides (see
 "Configuration" above). `architecture_invariants` just runs
 `scripts/check_architecture_invariants.sh` (see "Architecture
@@ -530,7 +530,7 @@ Roughly in the order it'd need doing to become a real intercom:
    assignments"); fix polarity/line numbers.
 2. Pulse-dial decoding off the same hook-detect edges
    `Tcm1171Controller` already timestamps.
-3. A real `AudioEngine` against the Codec Zero (ALSA duplex, its own
+3. A real `Engine` against the Codec Zero (ALSA duplex, its own
    thread(s), a ring/tone generator for the TCM1171's ring cadence),
    opening the named devices `StationRegistry` already hands it.
 4. Verified per-channel routing in `config/asound.conf` (currently plain

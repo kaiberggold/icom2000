@@ -13,7 +13,7 @@
 namespace icom::core {
 
 SignalWatcher::SignalWatcher(EventLoop& loop, std::initializer_list<int> signals,
-                             std::function<void(int)> onSignal)
+                              std::function<void(int)> onSignal)
     : loop_(loop) {
     sigset_t mask;
     sigemptyset(&mask);

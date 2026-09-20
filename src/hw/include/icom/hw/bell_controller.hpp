@@ -21,12 +21,12 @@ public:
 
     void ring();
     void silence();
-    bool is_ringing() const;
+    bool isRinging() const;
 
     // Convenience for "ring for exactly this long": schedules silence() on
     // the given EventLoop. The loop must outlive the returned call, i.e.
     // don't call this after the loop has stopped for good.
-    void ring_for(std::chrono::milliseconds duration, core::EventLoop& loop);
+    void ringFor(std::chrono::milliseconds duration, core::EventLoop& loop);
 
 private:
     std::unique_ptr<gpio::OutputPin> pin_;

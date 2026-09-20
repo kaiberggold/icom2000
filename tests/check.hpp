@@ -9,7 +9,7 @@
 
 namespace icom::testing {
 
-inline int& failure_count() {
+inline int& failureCount() {
     static int n = 0;
     return n;
 }
@@ -17,7 +17,7 @@ inline int& failure_count() {
 inline void check(bool condition, const char* expr, const char* file, int line) {
     if (!condition) {
         std::cerr << file << ":" << line << ": CHECK failed: " << expr << "\n";
-        ++failure_count();
+        ++failureCount();
     }
 }
 

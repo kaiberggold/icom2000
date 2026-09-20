@@ -34,13 +34,13 @@ public:
 
     // `events` is a poll(2) request mask, typically POLLIN. The callback is
     // invoked from run() on this same thread -- no locking needed inside it.
-    void add_fd(int fd, short events, FdCallback callback);
-    void remove_fd(int fd);
+    void addFd(int fd, short events, FdCallback callback);
+    void removeFd(int fd);
 
     // Backed by timerfd_create(2), so timers are just more fds to the
     // reactor rather than a separate subsystem.
-    TimerId add_timer(std::chrono::milliseconds interval, bool repeat, TimerCallback callback);
-    void remove_timer(TimerId id);
+    TimerId addTimer(std::chrono::milliseconds interval, bool repeat, TimerCallback callback);
+    void removeTimer(TimerId id);
 
     // Blocks, dispatching callbacks, until stop() is called or `token` is
     // cancelled. Safe to call stop() from another thread (e.g. a signal

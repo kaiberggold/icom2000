@@ -19,7 +19,7 @@ public:
     // thread, so the blocked signal mask (which is inherited, not shared)
     // covers the whole process.
     SignalWatcher(EventLoop& loop, std::initializer_list<int> signals,
-                  std::function<void(int signo)> on_signal);
+                  std::function<void(int signo)> onSignal);
     ~SignalWatcher();
 
     SignalWatcher(const SignalWatcher&) = delete;

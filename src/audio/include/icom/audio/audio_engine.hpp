@@ -18,24 +18,24 @@ namespace icom::audio {
 // deliberately NOT folded into the EventLoop's poll(), since audio I/O has
 // hard timing needs poll()'s single-threaded dispatch shouldn't be allowed
 // to jitter.
-class AudioEngine {
+class Engine {
 public:
-    virtual ~AudioEngine() = default;
+    virtual ~Engine() = default;
 
     virtual void start() = 0;
     virtual void stop() = 0;
-    virtual bool is_running() const = 0;
+    virtual bool isRunning() const = 0;
 };
 
 // `stations` supplies each station's named ALSA PCM devices (defined in
 // config/asound.conf, resolved from config/icom2000.conf -- see
-// docs/ARCHITECTURE.md "Stations"). NullAudioEngine itself does nothing
+// docs/ARCHITECTURE.md "Stations"). NullEngine itself does nothing
 // with them; they're threaded through here anyway so the *signature* a
 // real engine has to implement never has room for a hardcoded sound-card
 // device string -- device names come from the registry, full stop.
 //
 // Swap the returned type out in the composition root
-// (src/app/daemon_main.cpp) once a real ALSA-backed AudioEngine exists.
-std::unique_ptr<AudioEngine> make_null_audio_engine(const config::StationRegistry& stations);
+// (src/app/daemon_main.cpp) once a real ALSA-backed Engine exists.
+std::unique_ptr<Engine> makeNullEngine(const config::StationRegistry& stations);
 
 } // namespace icom::audio
