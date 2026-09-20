@@ -57,6 +57,7 @@ struct Options {
     std::optional<std::string> gpio_chip;
     std::string config_path = "/etc/icom2000.conf";
     std::string log_level_spec; // empty: leave whatever ICOM_LOG set (or the built-in default)
+    bool log_console = false;
 };
 
 Options parse_args(int argc, char** argv) {
@@ -71,16 +72,24 @@ Options parse_args(int argc, char** argv) {
             opts.config_path = argv[++i];
         } else if (arg == "--log-level" && i + 1 < argc) {
             opts.log_level_spec = argv[++i];
+        } else if (arg == "--log-console") {
+            opts.log_console = true;
         } else if (arg == "--help") {
             std::cout
-                << "usage: intercomd [--config PATH] [--socket PATH] [--gpio-chip NAME] [--log-level SPEC]\n"
+                << "usage: intercomd [--config PATH] [--socket PATH] [--gpio-chip NAME]\n"
+                << "                 [--log-level SPEC] [--log-console]\n"
                 << "  --config PATH   config file (default: /etc/icom2000.conf; see config/icom2000.conf\n"
                 << "                  in the repo for the shipped defaults and format). --socket and\n"
                 << "                  --gpio-chip, if given, override that file's [daemon] section.\n"
                 << "  SPEC: a default level and/or per-component overrides, e.g.\n"
                 << "        \"warn,gpio.mock=debug,ipc.control_server=debug\"\n"
                 << "        (also settable via the ICOM_LOG environment variable;\n"
-                << "        --log-level takes precedence when both are given)\n";
+                << "        --log-level takes precedence when both are given)\n"
+                << "  --log-console   also print log messages to stderr, at the level(s) above\n"
+                << "                  (in addition to syslog, not instead of it) -- useful when\n"
+                << "                  running interactively or under a debugger; not needed for a\n"
+                << "                  systemd-managed run, since journalctl already has everything\n"
+                << "                  syslog gets\n";
             std::exit(0);
         }
     }
@@ -95,6 +104,10 @@ int main(int argc, char** argv) {
     icom::core::init_syslog("icom2000");
 
     const Options opts = parse_args(argc, argv);
+
+    if (opts.log_console) {
+        icom::core::set_console_output(true);
+    }
 
     // ICOM_LOG sets the baseline (e.g. from systemd's Environment=); a
     // --log-level on the command line overrides it for one run without

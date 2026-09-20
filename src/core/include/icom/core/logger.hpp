@@ -77,6 +77,18 @@ bool configure_levels(std::string_view spec);
 // false under the same conditions configure_levels() does.
 bool configure_levels_from_env(const char* env_var = "ICOM_LOG");
 
+// Mirrors every logged message to stderr, in addition to syslog, subject
+// to the same per-component level filtering -- off by default. Meant for
+// interactive use (e.g. a VS Code cppdbg session with
+// "externalConsole": false, which captures the debuggee's stderr into the
+// Debug Console) where waiting on `journalctl`/a syslog listener in a
+// second window is more friction than it's worth. Safe to leave on for a
+// real deployment too (stderr just goes wherever systemd sends it, which
+// for a unit without its own `StandardError=` is the journal -- so this
+// would only ever double up output that's already journal-bound), but
+// there's no reason to bother when it's not being watched.
+void set_console_output(bool enable);
+
 // Opens the syslog connection every Logger writes through (openlog(3)).
 // Call once, early in main(), before spawning any other thread --
 // openlog()'s `ident` is retained by pointer, not copied, by glibc, so

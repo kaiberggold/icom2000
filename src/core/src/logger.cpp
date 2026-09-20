@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
+#include <iostream>
 #include <mutex>
 #include <optional>
 #include <unordered_map>
@@ -21,6 +22,20 @@ int to_syslog_priority(LogLevel level) {
     }
     return LOG_INFO;
 }
+
+const char* level_name(LogLevel level) {
+    switch (level) {
+        case LogLevel::Debug: return "DEBUG";
+        case LogLevel::Info:  return "INFO";
+        case LogLevel::Warn:  return "WARN";
+        case LogLevel::Error: return "ERROR";
+    }
+    return "INFO";
+}
+
+// Set via set_console_output(); read on every Logger::log() call, so a
+// plain std::atomic rather than something guarded by Registry::mutex.
+std::atomic<bool> console_output_enabled{false};
 
 std::string_view trim(std::string_view s) {
     const auto is_space = [](unsigned char c) { return std::isspace(c) != 0; };
@@ -76,6 +91,15 @@ void Logger::log(LogLevel level, std::string_view message) const {
     }
     ::syslog(to_syslog_priority(level), "[%s] %.*s", component_.c_str(),
              static_cast<int>(message.size()), message.data());
+    if (console_output_enabled.load(std::memory_order_relaxed)) {
+        // Built as one string and written with a single `<<` (std::endl to
+        // flush immediately, so it shows up in a VS Code Debug Console
+        // right away rather than sitting in a buffer) -- std::cerr flushes
+        // after every individual `<<` by default, so writing the pieces
+        // separately would let concurrent loggers' lines interleave.
+        std::cerr << (std::string(level_name(level)) + " [" + component_ + "] " + std::string(message))
+                   << std::endl;
+    }
 }
 
 Logger& get_logger(std::string_view component) {
@@ -159,6 +183,10 @@ bool configure_levels_from_env(const char* env_var) {
         return true; // unset is not an error, just "nothing to configure"
     }
     return configure_levels(value);
+}
+
+void set_console_output(bool enable) {
+    console_output_enabled.store(enable, std::memory_order_relaxed);
 }
 
 void init_syslog(std::string_view ident, int facility) {

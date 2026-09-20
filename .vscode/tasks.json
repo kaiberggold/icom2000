@@ -77,7 +77,7 @@
                 // expose beyond it. pkill first so a debug session killed
                 // without detaching (VS Code crash, laptop sleep) doesn't
                 // leave the port stuck for next time.
-                "pkill -f 'gdbserver :2345' 2>/dev/null; cd ${input:piDeployDir} && exec gdbserver :2345 ./intercomd-debug --socket /tmp/icom2000-debug.sock --log-level debug"
+                "pkill -f 'gdbserver :2345' 2>/dev/null; cd ${input:piDeployDir} && exec gdbserver :2345 ./intercomd-debug --socket /tmp/icom2000-debug.sock --log-level debug --log-console"
             ],
             "dependsOn": "deploy-debug-binary",
             "isBackground": true,

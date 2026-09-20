@@ -27,7 +27,7 @@
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceFolder}/build/host-dev/src/app/intercomd",
-            "args": ["--socket", "/tmp/icom2000-debug.sock", "--log-level", "debug"],
+            "args": ["--socket", "/tmp/icom2000-debug.sock", "--log-level", "debug", "--log-console"],
             "cwd": "${workspaceFolder}",
             "stopAtEntry": false,
             "externalConsole": false,
