@@ -1,5 +1,7 @@
 #pragma once
 
+#include "icom/config/station_registry.hpp"
+
 #include <memory>
 
 namespace icom::audio {
@@ -25,9 +27,15 @@ public:
     virtual bool is_running() const = 0;
 };
 
-// No-op implementation so the daemon can run end-to-end today. Swap out in
-// the composition root (src/app/daemon_main.cpp) once a real ALSA-backed
-// AudioEngine exists.
-std::unique_ptr<AudioEngine> make_null_audio_engine();
+// `stations` supplies each station's named ALSA PCM devices (defined in
+// config/asound.conf, resolved from config/icom2000.conf -- see
+// docs/ARCHITECTURE.md "Stations"). NullAudioEngine itself does nothing
+// with them; they're threaded through here anyway so the *signature* a
+// real engine has to implement never has room for a hardcoded sound-card
+// device string -- device names come from the registry, full stop.
+//
+// Swap the returned type out in the composition root
+// (src/app/daemon_main.cpp) once a real ALSA-backed AudioEngine exists.
+std::unique_ptr<AudioEngine> make_null_audio_engine(const config::StationRegistry& stations);
 
 } // namespace icom::audio

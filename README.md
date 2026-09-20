@@ -40,6 +40,11 @@ and level-filterable: `intercomd --log-level "warn,gpio.mock=debug"` or the
 equivalent `ICOM_LOG` environment variable -- see
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) "Logging".
 
+Runtime config (GPIO lines, the station name -> ALSA device mapping) comes
+from `config/icom2000.conf` (`--config PATH` to point elsewhere; built-in
+defaults if it's missing) -- see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+"Configuration".
+
 ## Build for the Pi Zero
 
 ```sh
@@ -52,9 +57,13 @@ above -- the Pi Zero 1.1 is ARMv6, and the toolchain you already have
 `apt install`ed almost certainly targets ARMv7, which will not run on this
 board.
 
-Then `scripts/deploy.sh user@pi-hostname` to copy the binaries over and
-restart the service (`systemd/intercomd.service`,
-`udev/99-icom2000-gpio.rules`).
+One-time target setup: install `systemd/intercomd.service`,
+`systemd/alsa-restore-codec-zero.service`, `udev/99-icom2000-gpio.rules`,
+`config/icom2000.conf` -> `/etc/icom2000.conf`, and `config/asound.conf`
+-> `/etc/asound.conf` (see [`config/README.md`](config/README.md) for the
+one piece that isn't tracked here, the alsactl state file itself). After
+that, `scripts/deploy.sh user@pi-hostname` copies just the binaries over
+and restarts `intercomd` for every subsequent update.
 
 ## VS Code (Windows + WSL2)
 
@@ -68,17 +77,19 @@ setup and how the remote-debug flow works.
 
 ```
 src/core/   reactor (EventLoop), signal handling, logging
+src/config/ ConfigFile (INI-style reader), StationRegistry
 src/gpio/   OutputPin/InputPin interfaces + mock and libgpiod backends
 src/hw/     BellController, Tcm1171Controller
 src/audio/  AudioEngine interface (stubbed -- see docs/ARCHITECTURE.md)
 src/ipc/    Unix-socket control protocol + server
 src/app/    intercomd (composition root)
 src/cli/    intercomctl
-tests/      host-only unit tests
+tests/      host-only unit tests + the architecture-invariants guard script
 docs/       architecture, cross-compile, and VS Code/WSL2 setup notes
-systemd/    intercomd.service
+config/     icom2000.conf, asound.conf (see config/README.md)
+systemd/    intercomd.service, alsa-restore-codec-zero.service
 udev/       GPIO group-permission rule
-scripts/    deploy.sh
+scripts/    deploy.sh, check_architecture_invariants.sh
 .vscode/    CMake presets wiring, build tasks, F5 debug configs (host + remote gdbserver)
 ```
 

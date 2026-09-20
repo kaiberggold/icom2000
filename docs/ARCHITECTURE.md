@@ -25,6 +25,8 @@ connecting real hardware.
 ```
 src/core/   EventLoop (reactor), SignalWatcher, logging -- no hardware
             or GPIO knowledge at all.
+src/config/ ConfigFile (INI-style reader) + StationRegistry -- see
+            "Configuration" below. No hardware knowledge either.
 src/gpio/   OutputPin/InputPin/GpioBackend interfaces, plus two
             implementations: MockBackend (in-process, for host dev/tests)
             and GpiodBackend (libgpiod, for target hardware).
@@ -38,15 +40,17 @@ src/app/    daemon_main.cpp -- the composition root. Everything above is
             constructed and wired together here; nothing else in the tree
             knows this file exists.
 src/cli/    intercomctl -- a thin client over src/ipc's protocol.
-tests/      Host-only unit tests (EventLoop + MockBackend).
+tests/      Host-only unit tests (EventLoop + MockBackend + ConfigFile +
+            the architecture-invariants guard script, see "Testing").
+config/     Deployment configuration -- see "Configuration" below.
 ```
 
 Each module is its own static library target with its own `include/`
 directory, so `src/hw` can depend on `icom::gpio`'s public headers without
 seeing `src/gpio`'s libgpiod internals, and `tests/` can link `icom::gpio`
 without linking `icom::hw` or `icom::ipc` at all. The dependency graph is
-intentionally a DAG that flows one way, core -> gpio -> hw -> app, with ipc
-and audio hanging off the side:
+intentionally a DAG that flows one way, core -> gpio -> hw -> app, with ipc,
+config, and audio hanging off the side:
 
 ```
 core <- gpio <- hw \
@@ -54,8 +58,14 @@ core <- gpio <- hw \
   |        |        /
   +------- ipc -----
   |
-  +------- audio ---
+  +------- config <- audio
 ```
+
+`src/hw` and `src/gpio` never depend on `config` or `audio` -- a physical
+GPIO trigger (a hook-state change, a future button press) is decoupled from
+whatever eventually reacts to it (today: nothing; later: possibly audio),
+by construction, not by convention. See "Architecture invariants" below for
+how that's actually enforced.
 
 ## Run model
 
@@ -239,10 +249,11 @@ libgpiod headers to exist.
 ### Pin assignments (placeholder)
 
 **Everything below is illustrative, not verified against a schematic.**
-`src/app/daemon_main.cpp` hardcodes `gpiochip0` lines 17 (bell), 27
-(TCM1171 ring-mode), 22 (TCM1171 polarity), and 23 (hook detect) purely so
-the daemon has *something* to construct and run end-to-end. Before wiring
-real hardware:
+`gpiochip0` lines 17 (bell), 27 (TCM1171 ring-mode), 22 (TCM1171 polarity),
+and 23 (hook detect) -- config/icom2000.conf's `[gpio.*]` sections, and
+`daemon_main.cpp`'s built-in defaults if that file is missing -- exist
+purely so the daemon has *something* to construct and run end-to-end.
+Before wiring real hardware:
 
 1. Confirm the TCM1171's actual digital control pins on your board (RM,
    FR) and which GPIOs they land on.
@@ -252,9 +263,9 @@ real hardware:
    that pin and whatever GPIO `Tcm1171Controller::Pins::hook_detect`
    ends up wired to. `on_hook_edge()`'s polarity (`High` == off-hook) is a
    placeholder guess, not a measured fact.
-3. Update the `k*PinLine` constants in `daemon_main.cpp` (or, better,
-   move them into a small config file once there's more than one
-   plausible board revision -- not worth the abstraction yet at n=1).
+3. Update the `[gpio.*]` sections in `config/icom2000.conf` (and its
+   installed copy, `/etc/icom2000.conf`) -- see "Configuration" below.
+   No code change needed; that's the point.
 
 ## Audio boundary
 
@@ -273,6 +284,140 @@ client blocking the loop for a few ms is a UX blemish; blocking the audio
 callback for a few ms is an audible glitch). The expected shape: its own
 thread(s), talking to the reactor thread via a lock-free queue or a
 handful of atomics, not shared mutable state.
+
+It should also **not** open a sound-card device string itself.
+`make_null_audio_engine()` already takes a `config::StationRegistry`
+(`src/config`, see "Configuration" below) and every `StationConfig` in it
+carries a named ALSA PCM device per station, resolved from
+`config/asound.conf` -- a real engine's constructor signature has nowhere
+left to reach for a raw device string, only names the registry handed it.
+See "Architecture invariants" for how that's enforced, not just requested.
+
+## Configuration
+
+`icom::config::ConfigFile` (`src/config/include/icom/config/config_file.hpp`)
+is a hand-rolled reader for a small INI-style format -- `[section]`
+headers, `key = value` lines, `#`/`;` comments -- backing
+`config/icom2000.conf` (installed as `/etc/icom2000.conf`). Same
+philosophy as the logging module's `configure_levels()`: no third-party
+YAML/JSON library, because the actual configuration surface here is small
+and flat, and results (not exceptions) cross the load/parse boundary
+because this reads content a human edits by hand, where a typo should
+become a clean startup error, not a stack unwind.
+
+`ConfigFile::load()` distinguishes two failure shapes on purpose:
+
+- **File missing** (`file_found = false`, `ok = true`): not an error.
+  `daemon_main.cpp` logs a warning and falls back to built-in defaults
+  that exactly match the shipped `config/icom2000.conf` -- so a fresh
+  checkout with nothing installed at `/etc/icom2000.conf` behaves
+  identically to having that file installed.
+- **File exists but is malformed** (`ok = false`): `intercomd` prints the
+  parse error (with a line number) and exits nonzero, the same fail-fast
+  posture `ICOM_LOG`/`--log-level` already have. Silently keeping stale
+  defaults next to a config file nobody noticed was broken would be worse.
+
+Precedence for the handful of values with a CLI flag (`--socket`,
+`--gpio-chip`) is: the flag, if given, wins; otherwise the config file's
+`[daemon]` section; otherwise the built-in default. GPIO line numbers
+(`[gpio.bell]`, `[gpio.tcm1171]`) have no CLI override -- there was no
+reason to add one -- but follow the same config-file-then-built-in-default
+fallback.
+
+### Stations
+
+`icom::config::StationRegistry` (`src/config/include/icom/config/station_registry.hpp`)
+is the **one place** a station name is tied to a physical/logical audio
+channel: `config/icom2000.conf`'s `[stations]` (the name list) and
+`[station.<name>]` (that station's named capture/playback devices,
+defined in `config/asound.conf`) sections. Everything else -- today, just
+the `AudioEngine` factory; later, whatever actually streams audio --
+refers to stations as `"door"`/`"inside"` and nothing else. No code
+anywhere works with "left"/"right" or a channel index; there wouldn't
+even be a natural place to put that, since a `StationConfig` only exposes
+a name and two device-name strings.
+
+This is what makes the eventual network extension (a third,
+possibly-remote station, or "door"/"inside" moving from the codec's
+analog crossbar to independent per-station digital capture/playback) a
+config-file change: add a `[station.mumble]` entry, or repoint an
+existing station's `capture_device`/`playback_device` at a different
+named PCM device in `config/asound.conf`. Nothing that refers to stations
+by name needs to change, because nothing ever encoded an assumption about
+*how many* stations there are or *what* backs each one.
+
+### Named ALSA devices
+
+`config/asound.conf` (installed as `/etc/asound.conf`) defines the PCM
+devices every `StationConfig` names: `icom_door_capture`,
+`icom_door_playback`, `icom_inside_capture`, `icom_inside_playback`. Today
+they're plain 1:1 aliases onto the one physical card (the file has the
+full rationale and caveats) -- what matters architecturally is that this
+is the *only* place a sound-card device string exists at all.
+`scripts/check_architecture_invariants.sh` greps `src/` for one and fails
+the build if it finds one (see "Architecture invariants"), so this isn't
+just a convention, it's checked on every `ctest` run.
+
+### Centralized mixer state
+
+Mixer state (the DA7212's crossbar routing between "door" and "inside",
+levels, switches) is set exactly once, at boot, by
+`systemd/alsa-restore-codec-zero.service` running
+`alsactl restore -f /etc/codec-zero-intercom.state` -- see that unit's
+comments and `config/README.md` for why the state file itself isn't
+shipped in this repo (it has to be captured from a live, already-tuned
+system; fabricating DA7212 control names without hardware to verify them
+against would be actively wrong). `intercomd` never calls into the ALSA
+control API or shells out to a mixer CLI at runtime, full stop -- if a
+user-facing volume control is ever added, it must go through exactly one
+function, not calls scattered across whatever component happens to want
+to change a level. `scripts/check_architecture_invariants.sh` greps
+`src/` for that too.
+
+Re-pointing a whole variant of the hardware (e.g. a DAC/ADC-based board
+supporting the network extension) at a different mixer layout means
+swapping the state file `alsa-restore-codec-zero.service` restores from --
+no code change.
+
+## Architecture invariants
+
+Four invariants came out of a requirements pass explicitly aimed at
+making the (currently unplanned, unimplemented) network/third-station
+extension possible later without a rewrite. Each is enforced by
+`scripts/check_architecture_invariants.sh`, which also runs as a `ctest`
+test (`architecture_invariants`) so it can't silently bit-rot:
+
+1. **No hardcoded ALSA card names in application code** (`grep` for a
+   quoted `hw:`/`plughw:` in `src/`). All audio access goes through the
+   named devices in `config/asound.conf` -- see "Named ALSA devices"
+   above. Eases the extension: swapping single-process `plug` aliases for
+   `dmix`/`dsnoop`/`route` (for concurrent per-station access once a
+   network-connected station needs the card at the same time as the local
+   ones) is then an `asound.conf`-only change.
+2. **No scattered mixer manipulation** (`grep` for `amixer`/`snd_mixer_`
+   in `src/`). See "Centralized mixer state" above. Eases the extension:
+   a hardware variant with a different routing story is a different state
+   file, not a different code path.
+3. **`src/hw` and `src/gpio` never depend on `src/audio`** (`grep` for an
+   `#include "icom/audio/` in either). Physical GPIO triggers (today:
+   `Tcm1171Controller`'s hook-detect edge, `BellController`'s output pin;
+   later: a door/talk button) are wired to whatever reacts to them only
+   in the composition root (`daemon_main.cpp`), via plain interfaces and
+   `std::function` callbacks -- `Tcm1171Controller`'s
+   `StateChangeCallback` is the existing example. Eases the extension: a
+   future button handler is a GPIO input pin plus a callback, exactly
+   like the existing ones; it is structurally incapable of knowing
+   whether what it triggers is an analog route, a Mumble push-to-talk, or
+   both, because it never includes anything that would tell it.
+4. **Stations are names, not channels.** Not independently `grep`-able
+   (there is no "channel index" type left in the codebase to search for),
+   but see "Stations" above -- `StationConfig` structurally has no room
+   for one.
+
+There is deliberately no fifth invariant abstracting "analog vs. digital
+vs. Mumble backend" -- nothing here decides what a station's audio path
+*is*, only what it's *named* and *called*, which is what the four
+invariants above actually needed to hold up.
 
 ## Control protocol / IPC
 
@@ -316,15 +461,20 @@ third-party framework (Catch2/doctest/GTest) via `FetchContent`, so
 is a ~20-line `CHECK()` macro. Swapping in a real framework later is a
 one-file change once the suite outgrows that.
 
-Two binaries, each its own `ctest` case: `icom_tests` covers `MockBackend`
-output/input behavior, and that an injected mock edge reaches an
-`EventLoop` callback end-to-end -- i.e. the same path `Tcm1171Controller`
-depends on in production. `icom_logger_tests` covers the logging registry
-and `configure_levels()` parsing (see "Logging" above). What's not
-covered: `GpiodBackend` (no libgpiod in this environment) and anything in
-`src/hw`/`src/ipc`/`src/app` beyond logging (straightforward to add
-following the same pattern; left out of this pass to keep it to "one
-representative example per layer" per the scaffold's brief).
+Four `ctest` cases: `icom_tests` covers `MockBackend` output/input
+behavior, and that an injected mock edge reaches an `EventLoop` callback
+end-to-end -- i.e. the same path `Tcm1171Controller` depends on in
+production. `icom_logger_tests` covers the logging registry and
+`configure_levels()` parsing (see "Logging" above). `icom_config_tests`
+covers `ConfigFile` parsing (including the missing-vs-malformed-file
+distinction) and `StationRegistry`'s defaults/overrides (see
+"Configuration" above). `architecture_invariants` just runs
+`scripts/check_architecture_invariants.sh` (see "Architecture
+invariants"). What's not covered: `GpiodBackend` (no libgpiod in this
+environment) and anything in `src/hw`/`src/ipc`/`src/app` beyond logging
+and config (straightforward to add following the same pattern; left out
+of this pass to keep it to "one representative example per layer" per the
+scaffold's brief).
 
 ## What's next
 
@@ -335,8 +485,16 @@ Roughly in the order it'd need doing to become a real intercom:
 2. Pulse-dial decoding off the same hook-detect edges
    `Tcm1171Controller` already timestamps.
 3. A real `AudioEngine` against the Codec Zero (ALSA duplex, its own
-   thread(s), a ring/tone generator for the TCM1171's ring cadence).
-4. Persist/report richer line state over the control protocol (e.g. call
+   thread(s), a ring/tone generator for the TCM1171's ring cadence),
+   opening the named devices `StationRegistry` already hands it.
+4. Verified per-channel routing in `config/asound.conf` (currently plain
+   1:1 aliases -- see that file's caveats) once there's real hardware to
+   check `route`/channel indices against.
+5. Persist/report richer line state over the control protocol (e.g. call
    duration, last-ring time) once there's a client that wants it.
-5. `sd_notify()`/watchdog integration once there's a concrete failure mode
+6. `sd_notify()`/watchdog integration once there's a concrete failure mode
    worth detecting.
+7. The network/third-station extension itself (a Mumble hub, or another
+   Pi) -- explicitly out of scope for this pass; see "Configuration" and
+   "Architecture invariants" for what was done instead to make it
+   possible without a rewrite.

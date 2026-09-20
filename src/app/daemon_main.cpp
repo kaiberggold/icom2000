@@ -2,6 +2,8 @@
 // here and wired together through the interfaces defined in each module;
 // nothing above this file knows about libgpiod, ALSA, or Unix sockets, and
 // nothing below it knows about the others. See docs/ARCHITECTURE.md.
+#include "icom/config/config_file.hpp"
+#include "icom/config/station_registry.hpp"
 #include "icom/core/event_loop.hpp"
 #include "icom/core/logger.hpp"
 #include "icom/core/signal_watcher.hpp"
@@ -17,6 +19,8 @@
 #include <csignal>
 #include <cstdlib>
 #include <iostream>
+#include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -43,8 +47,15 @@ std::string to_upper(std::string s) {
 }
 
 struct Options {
-    std::string socket_path = "/run/icom2000.sock";
-    std::string gpio_chip = "gpiochip0";
+    // unset means "not given on the command line" -- resolved against the
+    // config file, then a built-in default, once the config is loaded
+    // (see main()). Keeping these as an explicit CLI override rather than
+    // pre-seeding them with the built-in defaults is what lets the config
+    // file's [daemon] section actually take effect when the flag isn't
+    // passed at all.
+    std::optional<std::string> socket_path;
+    std::optional<std::string> gpio_chip;
+    std::string config_path = "/etc/icom2000.conf";
     std::string log_level_spec; // empty: leave whatever ICOM_LOG set (or the built-in default)
 };
 
@@ -56,27 +67,25 @@ Options parse_args(int argc, char** argv) {
             opts.socket_path = argv[++i];
         } else if (arg == "--gpio-chip" && i + 1 < argc) {
             opts.gpio_chip = argv[++i];
+        } else if (arg == "--config" && i + 1 < argc) {
+            opts.config_path = argv[++i];
         } else if (arg == "--log-level" && i + 1 < argc) {
             opts.log_level_spec = argv[++i];
         } else if (arg == "--help") {
-            std::cout << "usage: intercomd [--socket PATH] [--gpio-chip NAME] [--log-level SPEC]\n"
-                       << "  SPEC: a default level and/or per-component overrides, e.g.\n"
-                       << "        \"warn,gpio.mock=debug,ipc.control_server=debug\"\n"
-                       << "        (also settable via the ICOM_LOG environment variable;\n"
-                       << "        --log-level takes precedence when both are given)\n";
+            std::cout
+                << "usage: intercomd [--config PATH] [--socket PATH] [--gpio-chip NAME] [--log-level SPEC]\n"
+                << "  --config PATH   config file (default: /etc/icom2000.conf; see config/icom2000.conf\n"
+                << "                  in the repo for the shipped defaults and format). --socket and\n"
+                << "                  --gpio-chip, if given, override that file's [daemon] section.\n"
+                << "  SPEC: a default level and/or per-component overrides, e.g.\n"
+                << "        \"warn,gpio.mock=debug,ipc.control_server=debug\"\n"
+                << "        (also settable via the ICOM_LOG environment variable;\n"
+                << "        --log-level takes precedence when both are given)\n";
             std::exit(0);
         }
     }
     return opts;
 }
-
-// BCM/line numbers below are placeholders for a sketch, not a verified
-// wiring diagram -- see docs/ARCHITECTURE.md "Pin assignments" before
-// touching real hardware.
-constexpr unsigned kBellPinLine = 17;
-constexpr unsigned kRingModePinLine = 27;
-constexpr unsigned kPolarityPinLine = 22;
-constexpr unsigned kHookDetectPinLine = 23;
 
 icom::core::Logger& kLog = icom::core::get_logger("app");
 
@@ -102,7 +111,59 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    kLog.info("starting (socket=" + opts.socket_path + ", gpio-chip=" + opts.gpio_chip + ")");
+    // Single load point for every runtime-tunable value (GPIO lines,
+    // station->device mapping, ...) -- see docs/ARCHITECTURE.md
+    // "Configuration". A missing file is not an error (falls back to the
+    // built-in defaults below, which match config/icom2000.conf exactly);
+    // a malformed *existing* file is, since silently keeping stale
+    // defaults there would be more confusing than refusing to start.
+    const auto config_result = icom::config::ConfigFile::load(opts.config_path);
+    if (!config_result.ok) {
+        std::cerr << "intercomd: " << opts.config_path << ": " << config_result.error << "\n";
+        return 1;
+    }
+    const icom::config::ConfigFile& config = config_result.config;
+    if (!config_result.file_found) {
+        kLog.warn("no config file at " + opts.config_path + " -- using built-in defaults");
+    }
+
+    // BCM/line numbers below are placeholders for a sketch, not a
+    // verified wiring diagram -- see docs/ARCHITECTURE.md "Pin
+    // assignments" before touching real hardware. They're also the
+    // fallback used when config/icom2000.conf's [gpio.*] sections are
+    // absent, so they must stay in sync with that file.
+    unsigned bell_pin_line = 17;
+    unsigned ring_mode_line = 27;
+    unsigned polarity_line = 22;
+    unsigned hook_detect_line = 23;
+    try {
+        bell_pin_line = config.get_uint("gpio.bell", "line", bell_pin_line);
+        ring_mode_line = config.get_uint("gpio.tcm1171", "ring_mode_line", ring_mode_line);
+        polarity_line = config.get_uint("gpio.tcm1171", "polarity_line", polarity_line);
+        hook_detect_line = config.get_uint("gpio.tcm1171", "hook_detect_line", hook_detect_line);
+    } catch (const std::exception& e) {
+        std::cerr << "intercomd: " << opts.config_path << ": invalid GPIO line number (" << e.what()
+                   << ")\n";
+        return 1;
+    }
+
+    const std::string socket_path =
+        opts.socket_path.value_or(config.get("daemon", "socket_path", "/run/icom2000.sock"));
+    const std::string gpio_chip = opts.gpio_chip.value_or(config.get("daemon", "gpio_chip", "gpiochip0"));
+
+    // The central station name -> device mapping (requirement: stations
+    // as logical names, never "left"/"right" or a channel index). Nothing
+    // consumes the device names yet beyond handing them to the (still
+    // stubbed) audio engine below, but every station-aware component from
+    // here on refers to "door"/"inside" by name, never by channel.
+    const icom::config::StationRegistry stations(config);
+    for (const auto& station : stations.all()) {
+        kLog.info("station \"" + station.name + "\": capture=" + station.capture_device +
+                   ", playback=" + station.playback_device);
+    }
+
+    kLog.info("starting (socket=" + socket_path + ", gpio-chip=" + gpio_chip +
+               ", config=" + opts.config_path + ")");
 
     EventLoop loop;
 
@@ -113,24 +174,24 @@ int main(int argc, char** argv) {
 
     auto gpio_backend = icom::gpio::make_default_backend();
 
-    BellController bell(gpio_backend->request_output(
-        PinConfig{opts.gpio_chip, kBellPinLine, "icom2000-bell"}, Level::Low));
+    BellController bell(
+        gpio_backend->request_output(PinConfig{gpio_chip, bell_pin_line, "icom2000-bell"}, Level::Low));
 
     Tcm1171Controller line(
         Tcm1171Controller::Pins{
-            gpio_backend->request_output(PinConfig{opts.gpio_chip, kRingModePinLine, "icom2000-tcm1171-rm"},
+            gpio_backend->request_output(PinConfig{gpio_chip, ring_mode_line, "icom2000-tcm1171-rm"},
                                           Level::Low),
-            gpio_backend->request_output(PinConfig{opts.gpio_chip, kPolarityPinLine, "icom2000-tcm1171-fr"},
+            gpio_backend->request_output(PinConfig{gpio_chip, polarity_line, "icom2000-tcm1171-fr"},
                                           Level::Low),
-            gpio_backend->request_input(PinConfig{opts.gpio_chip, kHookDetectPinLine, "icom2000-tcm1171-hook"},
+            gpio_backend->request_input(PinConfig{gpio_chip, hook_detect_line, "icom2000-tcm1171-hook"},
                                          Edge::Both),
         },
         loop);
 
-    auto audio = icom::audio::make_null_audio_engine();
+    auto audio = icom::audio::make_null_audio_engine(stations);
     audio->start();
 
-    icom::ipc::ControlServer server(opts.socket_path, loop);
+    icom::ipc::ControlServer server(socket_path, loop);
 
     server.register_command("PING", [](const auto&) { return CommandResult::success("pong"); });
 

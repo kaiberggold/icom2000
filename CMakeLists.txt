@@ -30,6 +30,7 @@ target_compile_options(icom_warnings INTERFACE
 )
 
 add_subdirectory(src/core)
+add_subdirectory(src/config)
 add_subdirectory(src/gpio)
 add_subdirectory(src/hw)
 add_subdirectory(src/audio)

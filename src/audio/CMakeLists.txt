@@ -8,4 +8,4 @@ target_include_directories(icom_audio PUBLIC
 )
 
 target_compile_features(icom_audio PUBLIC cxx_std_20)
-target_link_libraries(icom_audio PUBLIC icom::core PRIVATE icom::warnings)
+target_link_libraries(icom_audio PUBLIC icom::core icom::config PRIVATE icom::warnings)
