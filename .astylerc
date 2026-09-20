@@ -1,0 +1,49 @@
+# Artistic Style config -- approximates this project's existing hand-written
+# style (attached braces, 4-space indents, unindented namespace bodies and
+# access modifiers, indented switch/case) closely enough that autoformat-on-
+# save shouldn't fight what's already here. See docs/VSCODE_WSL2_SETUP.md
+# for the VS Code extension that reads this file, and
+# .vscode/settings.json for where format-on-save is turned on.
+#
+# Not a perfect match for every hand-formatted nuance in the codebase (no
+# tool fully replicates human judgment on wrapping long lines/comments --
+# astyle is told not to try, see max-code-length below) -- if a save
+# reformats something in a way that looks wrong, say so rather than
+# fighting it file-by-file with disable comments.
+
+style=attach
+indent=spaces=4
+
+# case labels indented one level inside their switch -- matches the
+# existing src/core/src/logger.cpp::to_syslog_priority() style, etc.
+indent-switches
+
+# Namespace bodies and class access modifiers (public:/private:) are NOT
+# further indented anywhere in this codebase -- these are astyle's
+# defaults, listed for clarity rather than left implicit.
+# indent-namespaces  (default: off)
+# indent-modifiers   (default: off)
+
+# Keep short one-line getters/bodies as written (e.g.
+# `bool is_ringing() const { return ringing_; }`) instead of astyle's
+# default of always breaking them onto multiple lines.
+keep-one-line-blocks
+keep-one-line-statements
+
+# `char** argv`, `std::string& component()` -- pointer/reference bound to
+# the type, not the variable name, everywhere in this codebase.
+align-pointer=type
+align-reference=type
+
+# Spacing: `if (x)` not `if(x)`; `a + b` not `a+b`; `f(a, b)` not
+# `f(a,b)`; `f(a)` not `f( a )`.
+pad-header
+pad-oper
+pad-comma
+unpad-paren
+
+# No max-code-length set (astyle's default is unlimited/unused): this
+# project already wraps long lines and doc comments by hand; astyle
+# breaking those on its own judgment would fight that rather than help it.
+
+convert-tabs

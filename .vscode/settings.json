@@ -12,6 +12,24 @@
     // preset's compile_commands.json); this is just the fallback for files
     // opened before the first configure runs.
     "C_Cpp.intelliSenseEngine": "default",
+    // cpptools has its own built-in clang-format-based formatter -- turned
+    // off so it doesn't fight astyle (below) over who formats on save.
+    "C_Cpp.formatting": "disabled",
+
+    // Autoformat on save via astyle (chiehyu.vscode-astyle), reading this
+    // repo's .astylerc -- see that file for what it does and does not
+    // match about the existing hand-written style, and
+    // docs/VSCODE_WSL2_SETUP.md for installing the `astyle` binary itself
+    // (the extension shells out to it; it isn't bundled).
+    "astyle.astylerc": "${workspaceFolder}/.astylerc",
+    "[cpp]": {
+        "editor.defaultFormatter": "chiehyu.vscode-astyle",
+        "editor.formatOnSave": true
+    },
+    "[c]": {
+        "editor.defaultFormatter": "chiehyu.vscode-astyle",
+        "editor.formatOnSave": true
+    },
 
     "files.associations": {
         "*.hpp": "cpp"
