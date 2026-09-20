@@ -58,13 +58,15 @@ set(ICOM_TARGET_CPU_FLAGS "${_icom_cpu_flags}" CACHE INTERNAL "Target CPU flags,
 # A toolchain you build yourself doesn't have to use the generic
 # "arm-linux-gnueabihf" triplet -- e.g. crosstool-NG's own
 # "armv6-unknown-linux-gnueabihf" sample (see docs/CROSS_COMPILE.md
-# "Option B") sets CT_TARGET_VENDOR="rpi", producing
-# arm-rpi-linux-gnueabihf-gcc instead. Both names are tried automatically;
-# set ICOM_TOOLCHAIN_PREFIX explicitly if yours is neither, or if more
-# than one candidate on PATH actually works and auto-detection picks the
-# wrong one for your purposes.
+# "Option B") sets CT_ARCH_SUFFIX="v6" and CT_TARGET_VENDOR="rpi",
+# producing armv6-rpi-linux-gnueabihf-gcc instead -- the "v6" comes from
+# the arch suffix, not the vendor field, so it's easy to miss when
+# eyeballing the sample name. Both this and the plain "arm-*" name are
+# tried automatically; set ICOM_TOOLCHAIN_PREFIX explicitly if yours is
+# neither, or if more than one candidate on PATH actually works and
+# auto-detection picks the wrong one for your purposes.
 set(ICOM_TOOLCHAIN_PREFIX "" CACHE STRING
-    "Cross-toolchain binary prefix (e.g. 'arm-rpi-linux-gnueabihf'). Auto-detected if empty.")
+    "Cross-toolchain binary prefix (e.g. 'armv6-rpi-linux-gnueabihf'). Auto-detected if empty.")
 
 # --- Sanity-check option, consulted by the discovery loop below ---
 #
@@ -120,7 +122,7 @@ separate_arguments(_icom_cpu_flags_list UNIX_COMMAND "${_icom_cpu_flags}")
 if(ICOM_TOOLCHAIN_PREFIX)
     set(_icom_candidate_prefixes "${ICOM_TOOLCHAIN_PREFIX}")
 else()
-    set(_icom_candidate_prefixes arm-linux-gnueabihf arm-rpi-linux-gnueabihf)
+    set(_icom_candidate_prefixes arm-linux-gnueabihf armv6-rpi-linux-gnueabihf arm-rpi-linux-gnueabihf)
 endif()
 
 set(_icom_probe_report "")

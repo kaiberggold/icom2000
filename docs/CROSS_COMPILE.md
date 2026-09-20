@@ -156,20 +156,27 @@ both confirmed by inspection, not guessed:
   the value in the exact commands below) is a safe, conservative choice
   that will run on any Raspberry Pi OS release from Bullseye onward,
   including current Bookworm.
-- **It sets `CT_TARGET_VENDOR="rpi"`**, so the built compiler is
-  `arm-rpi-linux-gnueabihf-gcc`, not `arm-linux-gnueabihf-gcc`. This
-  project's toolchain file tries both names automatically, **and verifies
-  each with the ARMv6 probe before accepting it** -- so if you also still
-  have a distro `gcc-arm-linux-gnueabihf` installed (very likely, if you
-  followed this doc from the top and only later got to Option B), the
-  toolchain file tries that one first, finds it fails the probe, and
-  automatically moves on to your `arm-rpi-linux-gnueabihf` one -- you do
-  not need to uninstall the distro package or pass anything extra for
-  this to work. If auto-detection ever does pick the wrong one of two
-  *working* toolchains (or your build uses a prefix that's neither of the
-  two tried by default), force it explicitly:
+- **It sets `CT_ARCH_SUFFIX="v6"` and `CT_TARGET_VENDOR="rpi"`**, so the
+  built compiler is `armv6-rpi-linux-gnueabihf-gcc`, not
+  `arm-linux-gnueabihf-gcc` -- the triplet is
+  `ARCH`+`ARCH_SUFFIX`-`VENDOR`-`KERNEL`-`SYS`, so it's the *arch* suffix,
+  not the vendor field, that adds the `v6` (easy to miss just from the
+  sample's own name, `armv6-unknown-linux-gnueabihf` -- only the vendor
+  field changes from that to what you actually get). This project's
+  toolchain file tries `arm-linux-gnueabihf` and `armv6-rpi-linux-gnueabihf`
+  automatically, **and verifies each with the ARMv6 probe before accepting
+  it** -- so if you also still have a distro `gcc-arm-linux-gnueabihf`
+  installed (very likely, if you followed this doc from the top and only
+  later got to Option B), the toolchain file tries that one first, finds
+  it fails the probe, and automatically moves on to your
+  `armv6-rpi-linux-gnueabihf` one -- you do not need to uninstall the
+  distro package or pass anything extra for this to work. If
+  auto-detection ever does pick the wrong one of two *working* toolchains
+  (or your build uses a prefix that's neither of the ones tried by
+  default -- check yours with `ls ~/x-tools` after step 4 below, since it
+  varies by crosstool-NG sample/version), force it explicitly:
   ```sh
-  cmake --preset pi0-release -DICOM_TOOLCHAIN_PREFIX=arm-rpi-linux-gnueabihf
+  cmake --preset pi0-release -DICOM_TOOLCHAIN_PREFIX=armv6-rpi-linux-gnueabihf
   ```
 
 Concrete steps:
@@ -207,9 +214,24 @@ mkdir ~/armv6-toolchain-build && cd ~/armv6-toolchain-build
 #    your network blocks those before you start):
 ~/crosstool-ng/ct-ng build
 
-# 5. The finished toolchain lands in ~/x-tools/arm-rpi-linux-gnueabihf/bin
-#    by default -- put it on PATH:
-export PATH="$HOME/x-tools/arm-rpi-linux-gnueabihf/bin:$PATH"
+# 5. crosstool-NG installs to ~/x-tools/<target-triplet>/ by default -- for
+#    this sample+vendor combination that's
+#    ~/x-tools/armv6-rpi-linux-gnueabihf/, and the actual compiler
+#    executables (armv6-rpi-linux-gnueabihf-gcc, etc.) are in its bin/
+#    subdirectory. Confirm the exact name rather than assuming it (it
+#    depends on the crosstool-NG version/sample, and has changed once
+#    already in this doc):
+ls ~/x-tools
+#    -> should show a single directory, e.g. armv6-rpi-linux-gnueabihf
+
+# Put that bin/ directory on PATH. Do this in ~/.bashrc (or your shell's
+# equivalent startup file), not just as a one-off `export` -- a plain
+# `export` only lasts for the current shell and won't carry over to new
+# terminals, VS Code's integrated terminal, or tasks it runs:
+echo 'export PATH="$HOME/x-tools/armv6-rpi-linux-gnueabihf/bin:$PATH"' >> ~/.bashrc
+source ~/.bashrc
+which armv6-rpi-linux-gnueabihf-gcc   # sanity check before building
+armv6-rpi-linux-gnueabihf-gcc --version
 
 # 6. Build icom2000 with it:
 cd /path/to/icom2000
@@ -298,7 +320,9 @@ after a toolchain change or before a first deploy:
 file build/pi0-release/src/app/intercomd
 # expect: ELF 32-bit LSB executable, ARM, EABI5 version 1 (SYSV) ...
 
-arm-linux-gnueabihf-readelf -A build/pi0-release/src/app/intercomd | grep -i "^  Tag_CPU_arch"
+armv6-rpi-linux-gnueabihf-readelf -A build/pi0-release/src/app/intercomd | grep -i "^  Tag_CPU_arch"
+# (use whatever your own toolchain's -readelf is actually called --
+# arm-linux-gnueabihf-readelf if you're on Option A/a distro toolchain)
 # expect: Tag_CPU_arch: v6 (or a note naming ARM1176/ARMv6, not v7)
 ```
 
