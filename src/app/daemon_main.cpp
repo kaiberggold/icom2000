@@ -36,6 +36,7 @@ using icom::hw::LineState;
 using icom::hw::StatusLed;
 using icom::hw::Tcm1171Controller;
 using icom::ipc::CommandResult;
+using namespace std::chrono_literals;
 
 namespace {
 
@@ -258,7 +259,7 @@ int main(int argc, char** argv) {
     // Visual "the daemon is up and its main loop is about to start"
     // signal -- fire-and-forget, scheduled on `loop` itself rather than
     // blocking startup for the ~900ms the full sequence takes.
-    status_led.blink_n_times(3, loop);
+    status_led.blink_n_times(3, loop,50ms,50ms);
 
     kLog.info("ready");
     loop.run();
