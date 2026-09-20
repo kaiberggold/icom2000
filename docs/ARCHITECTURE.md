@@ -224,11 +224,20 @@ that interface:
   logic.
 - **GpiodBackend** (`src/gpio/src/gpiod`): the real thing, against
   libgpiod's v2 C++ API. Only compiled when `-DICOM_WITH_LIBGPIOD=ON`
-  (the `pi0-release` preset does this). **Not compile-tested in this
-  pass** -- there is no libgpiod and no armv6 toolchain in the environment
-  this scaffold was built in. Treat it as a strong first draft; the first
-  `cmake --build --preset pi0-release` on real target headers is expected
-  to need small signature fixes.
+  (the `pi0-release`/`pi0-debug` presets do this). Compile- and
+  link-tested end to end -- cross-built against a real libgpiod v2.3.1
+  (see "Building libgpiod from source" in docs/CROSS_COMPILE.md) with an
+  `arm-linux-gnueabihf` compiler, producing a real `intercomd` ELF binary.
+  One real bug turned up this way and was fixed: `GpiodInputPin::read()`
+  called `gpiod::line_request::get_value()`, which isn't `const` in the
+  actual API, from a `const` member function -- `request_` is now
+  `mutable`, since reading a pin's value is logically const from
+  `InputPin::read()`'s perspective regardless of that binding's own
+  constness. **Not yet verified on real hardware** -- the toolchain used
+  to compile-test it cannot itself produce valid ARMv6 output (see
+  docs/CROSS_COMPILE.md's "Read this first"), so this confirms the code
+  is correct C++ against the real API, not that it behaves correctly
+  against a real GPIO chip.
 
 Which backend `make_default_backend()` returns is a compile-time choice
 (`ICOM_WITH_LIBGPIOD`), not a runtime one -- there is no reason a Pi
@@ -470,10 +479,13 @@ covers `ConfigFile` parsing (including the missing-vs-malformed-file
 distinction) and `StationRegistry`'s defaults/overrides (see
 "Configuration" above). `architecture_invariants` just runs
 `scripts/check_architecture_invariants.sh` (see "Architecture
-invariants"). What's not covered: `GpiodBackend` (no libgpiod in this
-environment) and anything in `src/hw`/`src/ipc`/`src/app` beyond logging
-and config (straightforward to add following the same pattern; left out
-of this pass to keep it to "one representative example per layer" per the
+invariants"). `GpiodBackend` isn't in this `ctest` suite (host-dev builds
+without it entirely, see "GPIO abstraction") but is compile/link-tested
+under the `pi0-release`/`pi0-debug` presets, per that section. What's
+still not covered: real hardware verification of `GpiodBackend`, and
+anything in `src/hw`/`src/ipc`/`src/app` beyond logging and config
+(straightforward to add following the same pattern; left out of this
+pass to keep it to "one representative example per layer" per the
 scaffold's brief).
 
 ## What's next
