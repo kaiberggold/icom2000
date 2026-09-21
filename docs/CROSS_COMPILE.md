@@ -249,7 +249,7 @@ against is either header-only or part of the toolchain's own bundled C/
 C++ runtime. You'd still want a sysroot (rsynced from a real Pi, feeding
 `ICOM_PI_SYSROOT`) for a library that genuinely has to match the target
 Raspberry Pi OS build exactly and isn't practical to cross-build yourself
--- ALSA (`libasound`), when the real `AudioEngine` implementation arrives,
+-- ALSA (`libasound`), when the real `Engine` implementation arrives,
 is the likely future example.
 
 If getting a real ARMv6 toolchain turns out to be more yak-shaving than

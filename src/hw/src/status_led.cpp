@@ -1,67 +1,82 @@
 #include "icom/hw/status_led.hpp"
 #include "icom/core/logger.hpp"
 
+#include <condition_variable>
+#include <mutex>
+
 namespace icom::hw {
 
 namespace {
-core::Logger& kLog = core::get_logger("hw.status_led");
-
-// Free function, not a member lambda that captures itself: a self-owning
-// std::function (one that captures a shared_ptr to the state it also
-// lives inside) is a reference cycle that never gets freed. Each
-// recursive step here instead schedules a *new* lambda that only captures
-// a copy of `state` -- state itself never holds a callback, so nothing
-// keeps itself alive.
-struct BlinkState {
-    StatusLed* led;
-    unsigned remaining; // on/off cycles left to complete
-    std::chrono::milliseconds on_duration;
-    std::chrono::milliseconds off_duration;
-};
-
-void blink_step(std::shared_ptr<BlinkState> state, core::EventLoop& loop) {
-    if (state->led->is_on()) {
-        state->led->off();
-        if (--state->remaining == 0) {
-            return; // sequence complete
-        }
-        loop.add_timer(state->off_duration, /*repeat=*/false,
-                        [state, &loop] { blink_step(state, loop); });
-    } else {
-        state->led->on();
-        loop.add_timer(state->on_duration, /*repeat=*/false,
-                        [state, &loop] { blink_step(state, loop); });
-    }
-}
-
+core::Logger& log = core::getLogger("hw.status_led");
 } // namespace
 
 StatusLed::StatusLed(std::unique_ptr<gpio::OutputPin> pin) : pin_(std::move(pin)) {
-    pin_->write(gpio::Level::Low);
+    pin_->write(gpio::Level::LOW);
+}
+
+StatusLed::~StatusLed() {
+    core::EventLoop* loop = blinkLoop_.load();
+    if (loop == nullptr) {
+        return; // blinkNTimes() was never called -- nothing to cancel
+    }
+    // Block until the cancellation has actually run on loop's own thread
+    // -- not just been posted -- so that by the time this destructor
+    // returns (and `this` becomes invalid), blinkStep() can no longer
+    // read anything through it. See the class comment.
+    std::mutex m;
+    std::condition_variable cv;
+    bool done = false;
+    loop->post([this, &m, &cv, &done] {
+        cancelled_ = true;
+        {
+            std::lock_guard lock(m);
+            done = true;
+        }
+        cv.notify_one();
+    });
+    std::unique_lock lock(m);
+    cv.wait(lock, [&done] { return done; });
 }
 
 void StatusLed::on() {
-    pin_->write(gpio::Level::High);
-    on_ = true;
+    pin_->write(gpio::Level::HIGH);
+    on_.store(true);
 }
 
 void StatusLed::off() {
-    pin_->write(gpio::Level::Low);
-    on_ = false;
+    pin_->write(gpio::Level::LOW);
+    on_.store(false);
 }
 
-bool StatusLed::is_on() const { return on_; }
-
-void StatusLed::blink_n_times(unsigned times, core::EventLoop& loop,
-                               std::chrono::milliseconds on_duration,
-                               std::chrono::milliseconds off_duration) {
+void StatusLed::blinkNTimes(unsigned times, core::EventLoop& loop, std::chrono::milliseconds onDuration,
+                            std::chrono::milliseconds offDuration) {
     if (times == 0) {
         return;
     }
-    kLog.debug("blinking " + std::to_string(times) + " time(s)");
+    log.debug("blinking " + std::to_string(times) + " time(s)");
+    blinkLoop_.store(&loop);
+    remaining_ = times;
+    onDuration_ = onDuration;
+    offDuration_ = offDuration;
     on();
-    auto state = std::make_shared<BlinkState>(BlinkState{this, times, on_duration, off_duration});
-    loop.add_timer(on_duration, /*repeat=*/false, [state, &loop] { blink_step(state, loop); });
+    loop.addTimer(onDuration, /*repeat=*/false, [this] { blinkStep(); });
+}
+
+void StatusLed::blinkStep() {
+    if (cancelled_) {
+        return; // ~StatusLed() is tearing this down; touch nothing further
+    }
+    core::EventLoop& loop = *blinkLoop_.load();
+    if (isOn()) {
+        off();
+        if (--remaining_ == 0) {
+            return; // sequence complete
+        }
+        loop.addTimer(offDuration_, /*repeat=*/false, [this] { blinkStep(); });
+    } else {
+        on();
+        loop.addTimer(onDuration_, /*repeat=*/false, [this] { blinkStep(); });
+    }
 }
 
 } // namespace icom::hw

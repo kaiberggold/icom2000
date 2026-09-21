@@ -1,6 +1,7 @@
 #include "icom/gpio/mock_backend.hpp"
 #include "icom/core/logger.hpp"
 
+#include <atomic>
 #include <deque>
 #include <mutex>
 #include <utility>
@@ -17,23 +18,29 @@ public:
     explicit MockOutputPin(PinConfig config, Level initial)
         : config_(std::move(config)), level_(initial) {}
 
-    void write(Level level) override { level_ = level; }
-    Level driven_level() const override { return level_; }
+    // atomic, not a plain Level: icom::hw::Pwm writes to pins from its own
+    // dedicated thread (see icom/core/loop_thread.hpp), so a pin this
+    // project hands to it -- directly, or by way of StatusLed's
+    // blinkNTimes() pointed at that same loop -- gets written from a
+    // different thread than whichever one constructed it or might read
+    // drivenLevel() back.
+    void write(Level level) override { level_.store(level); }
+    Level drivenLevel() const override { return level_.load(); }
 
 private:
     PinConfig config_;
-    Level level_;
+    std::atomic<Level> level_;
 };
 
 class MockInputPin final : public InputPin {
 public:
     explicit MockInputPin(PinConfig config) : config_(std::move(config)) {
-        event_fd_ = eventfd(0, EFD_NONBLOCK);
+        eventFd_ = eventfd(0, EFD_NONBLOCK);
     }
 
     ~MockInputPin() override {
-        if (event_fd_ >= 0) {
-            ::close(event_fd_);
+        if (eventFd_ >= 0) {
+            ::close(eventFd_);
         }
     }
 
@@ -42,58 +49,58 @@ public:
         return level_;
     }
 
-    int event_fd() const override { return event_fd_; }
+    int eventFd() const override { return eventFd_; }
 
-    void consume_events(const EdgeCallback& callback) override {
+    void consumeEvents(const EdgeCallback& callback) override {
         std::uint64_t drain = 0;
-        (void)::read(event_fd_, &drain, sizeof(drain));
+        (void)::read(eventFd_, &drain, sizeof(drain));
 
         std::deque<std::pair<Level, std::chrono::steady_clock::time_point>> pending;
         {
             std::lock_guard lock(mutex_);
-            pending.swap(pending_events_);
+            pending.swap(pendingEvents_);
         }
         for (const auto& [level, at] : pending) {
             callback(level, at);
         }
     }
 
-    // Test-only entry point, reached via inject_mock_edge().
+    // Test-only entry point, reached via injectMockEdge().
     void inject(Level level) {
         {
             std::lock_guard lock(mutex_);
             level_ = level;
-            pending_events_.emplace_back(level, std::chrono::steady_clock::now());
+            pendingEvents_.emplace_back(level, std::chrono::steady_clock::now());
         }
         const std::uint64_t one = 1;
-        (void)::write(event_fd_, &one, sizeof(one));
+        (void)::write(eventFd_, &one, sizeof(one));
     }
 
 private:
     PinConfig config_;
-    int event_fd_ = -1;
+    int eventFd_ = -1;
     mutable std::mutex mutex_;
-    Level level_ = Level::Low;
-    std::deque<std::pair<Level, std::chrono::steady_clock::time_point>> pending_events_;
+    Level level_ = Level::LOW;
+    std::deque<std::pair<Level, std::chrono::steady_clock::time_point>> pendingEvents_;
 };
 
-core::Logger& kLog = core::get_logger("gpio.mock");
+core::Logger& log = core::getLogger("gpio.mock");
 
 } // namespace
 
-std::unique_ptr<OutputPin> MockBackend::request_output(const PinConfig& config, Level initial) {
-    kLog.debug("requesting output " + config.chip + ":" + std::to_string(config.line) + " (" +
-               config.consumer + ")");
+std::unique_ptr<OutputPin> MockBackend::requestOutput(const PinConfig& config, Level initial) {
+    log.debug("requesting output " + config.chip + ":" + std::to_string(config.line) + " (" +
+              config.consumer + ")");
     return std::make_unique<MockOutputPin>(config, initial);
 }
 
-std::unique_ptr<InputPin> MockBackend::request_input(const PinConfig& config, Edge /*edge*/) {
-    kLog.debug("requesting input " + config.chip + ":" + std::to_string(config.line) + " (" +
-               config.consumer + ")");
+std::unique_ptr<InputPin> MockBackend::requestInput(const PinConfig& config, Edge /*edge*/) {
+    log.debug("requesting input " + config.chip + ":" + std::to_string(config.line) + " (" +
+              config.consumer + ")");
     return std::make_unique<MockInputPin>(config);
 }
 
-bool inject_mock_edge(InputPin& pin, Level level) {
+bool injectMockEdge(InputPin& pin, Level level) {
     if (auto* mock = dynamic_cast<MockInputPin*>(&pin)) {
         mock->inject(level);
         return true;

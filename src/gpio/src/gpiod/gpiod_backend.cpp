@@ -8,6 +8,7 @@
 #include "gpiod_backend.hpp"
 #include "icom/core/logger.hpp"
 
+#include <atomic>
 #include <chrono>
 #include <stdexcept>
 #include <string>
@@ -18,9 +19,9 @@ namespace icom::gpio {
 
 namespace {
 
-core::Logger& kLog = core::get_logger("gpio.gpiod");
+core::Logger& log = core::getLogger("gpio.gpiod");
 
-std::string chip_path(const std::string& chip) {
+std::string chipPath(const std::string& chip) {
     // Accept either a bare name ("gpiochip0") or an already-qualified path.
     if (!chip.empty() && chip.front() == '/') {
         return chip;
@@ -28,11 +29,11 @@ std::string chip_path(const std::string& chip) {
     return "/dev/" + chip;
 }
 
-::gpiod::line::edge to_gpiod_edge(Edge edge) {
+::gpiod::line::edge toGpiodEdge(Edge edge) {
     switch (edge) {
-        case Edge::Rising:  return ::gpiod::line::edge::RISING;
-        case Edge::Falling: return ::gpiod::line::edge::FALLING;
-        case Edge::Both:    return ::gpiod::line::edge::BOTH;
+        case Edge::RISING:  return ::gpiod::line::edge::RISING;
+        case Edge::FALLING: return ::gpiod::line::edge::FALLING;
+        case Edge::BOTH:    return ::gpiod::line::edge::BOTH;
     }
     return ::gpiod::line::edge::BOTH;
 }
@@ -40,8 +41,8 @@ std::string chip_path(const std::string& chip) {
 // libstdc++/glibc on Linux back steady_clock with CLOCK_MONOTONIC, which is
 // also what the kernel GPIO uAPI timestamps edge events with -- so treating
 // the two as the same clock is safe in practice, if not portable in theory.
-std::chrono::steady_clock::time_point to_time_point(std::uint64_t timestamp_ns) {
-    return std::chrono::steady_clock::time_point(std::chrono::nanoseconds(timestamp_ns));
+std::chrono::steady_clock::time_point toTimePoint(std::uint64_t timestampNs) {
+    return std::chrono::steady_clock::time_point(std::chrono::nanoseconds(timestampNs));
 }
 
 class GpiodOutputPin final : public OutputPin {
@@ -49,18 +50,20 @@ public:
     GpiodOutputPin(::gpiod::line_request request, unsigned line, Level initial)
         : request_(std::move(request)), line_(line), driven_(initial) {}
 
+    // atomic: see MockOutputPin's own comment (mock_backend.cpp) -- same
+    // reasoning applies here, this is just the other backend.
     void write(Level level) override {
-        request_.set_value(line_, level == Level::High ? ::gpiod::line::value::ACTIVE
-                                                         : ::gpiod::line::value::INACTIVE);
-        driven_ = level;
+        request_.set_value(line_, level == Level::HIGH ? ::gpiod::line::value::ACTIVE
+                           : ::gpiod::line::value::INACTIVE);
+        driven_.store(level);
     }
 
-    Level driven_level() const override { return driven_; }
+    Level drivenLevel() const override { return driven_.load(); }
 
 private:
     ::gpiod::line_request request_;
     unsigned line_;
-    Level driven_;
+    std::atomic<Level> driven_;
 };
 
 class GpiodInputPin final : public InputPin {
@@ -69,18 +72,18 @@ public:
         : request_(std::move(request)), line_(line) {}
 
     Level read() const override {
-        return request_.get_value(line_) == ::gpiod::line::value::ACTIVE ? Level::High : Level::Low;
+        return request_.get_value(line_) == ::gpiod::line::value::ACTIVE ? Level::HIGH : Level::LOW;
     }
 
-    int event_fd() const override { return request_.fd(); }
+    int eventFd() const override { return request_.fd(); }
 
-    void consume_events(const EdgeCallback& callback) override {
+    void consumeEvents(const EdgeCallback& callback) override {
         ::gpiod::edge_event_buffer buffer;
         request_.read_edge_events(buffer);
         for (const auto& event : buffer) {
             const Level level =
-                event.type() == ::gpiod::edge_event::event_type::RISING_EDGE ? Level::High : Level::Low;
-            callback(level, to_time_point(event.timestamp_ns()));
+                event.type() == ::gpiod::edge_event::event_type::RISING_EDGE ? Level::HIGH : Level::LOW;
+            callback(level, toTimePoint(event.timestamp_ns()));
         }
     }
 
@@ -96,40 +99,40 @@ private:
 
 } // namespace
 
-std::unique_ptr<OutputPin> GpiodBackend::request_output(const PinConfig& config, Level initial) {
-    ::gpiod::chip chip(chip_path(config.chip));
+std::unique_ptr<OutputPin> GpiodBackend::requestOutput(const PinConfig& config, Level initial) {
+    ::gpiod::chip chip(chipPath(config.chip));
 
     ::gpiod::line_settings settings;
     settings.set_direction(::gpiod::line::direction::OUTPUT)
-        .set_output_value(initial == Level::High ? ::gpiod::line::value::ACTIVE
-                                                   : ::gpiod::line::value::INACTIVE);
+    .set_output_value(initial == Level::HIGH ? ::gpiod::line::value::ACTIVE
+                      : ::gpiod::line::value::INACTIVE);
 
     auto request = chip.prepare_request()
-                       .set_consumer(config.consumer)
-                       .add_line_settings(config.line, settings)
-                       .do_request();
+                   .set_consumer(config.consumer)
+                   .add_line_settings(config.line, settings)
+                   .do_request();
 
-    kLog.info("requested output " + config.chip + ":" + std::to_string(config.line) + " (" +
-              config.consumer + ")");
+    log.info("requested output " + config.chip + ":" + std::to_string(config.line) + " (" +
+             config.consumer + ")");
     return std::make_unique<GpiodOutputPin>(std::move(request), config.line, initial);
 }
 
-std::unique_ptr<InputPin> GpiodBackend::request_input(const PinConfig& config, Edge edge) {
-    ::gpiod::chip chip(chip_path(config.chip));
+std::unique_ptr<InputPin> GpiodBackend::requestInput(const PinConfig& config, Edge edge) {
+    ::gpiod::chip chip(chipPath(config.chip));
 
     ::gpiod::line_settings settings;
     // TODO: whether this line needs an internal pull (e.g. PULL_UP for an
     // open-drain hook-detect comparator) depends on the actual board wiring
     // -- confirm against the schematic before relying on this in hardware.
-    settings.set_direction(::gpiod::line::direction::INPUT).set_edge_detection(to_gpiod_edge(edge));
+    settings.set_direction(::gpiod::line::direction::INPUT).set_edge_detection(toGpiodEdge(edge));
 
     auto request = chip.prepare_request()
-                       .set_consumer(config.consumer)
-                       .add_line_settings(config.line, settings)
-                       .do_request();
+                   .set_consumer(config.consumer)
+                   .add_line_settings(config.line, settings)
+                   .do_request();
 
-    kLog.info("requested input " + config.chip + ":" + std::to_string(config.line) + " (" +
-              config.consumer + ")");
+    log.info("requested input " + config.chip + ":" + std::to_string(config.line) + " (" +
+             config.consumer + ")");
     return std::make_unique<GpiodInputPin>(std::move(request), config.line);
 }
 

@@ -1,33 +1,36 @@
 #include "icom/hw/bell_controller.hpp"
 #include "icom/core/logger.hpp"
 
+#include <algorithm>
+
 namespace icom::hw {
 
 namespace {
-core::Logger& kLog = core::get_logger("hw.bell");
+core::Logger& log = core::getLogger("hw.bell");
 } // namespace
 
-BellController::BellController(std::unique_ptr<gpio::OutputPin> pin) : pin_(std::move(pin)) {
-    pin_->write(gpio::Level::Low);
-}
+BellController::BellController(std::unique_ptr<Pwm> pwm, std::chrono::milliseconds ringDutyTime)
+    : pwm_(std::move(pwm)),
+      ringDutyTime_(std::clamp(ringDutyTime, std::chrono::milliseconds::zero(), pwm_->period())) {}
 
 void BellController::ring() {
-    pin_->write(gpio::Level::High);
+    pwm_->setDutyTime(ringDutyTime_);
     ringing_ = true;
-    kLog.info("ringing");
+    log.info("ringing (duty=" + std::to_string(ringDutyTime_.count()) + "/" +
+             std::to_string(pwm_->period().count()) + "ms)");
 }
 
 void BellController::silence() {
-    pin_->write(gpio::Level::Low);
+    pwm_->setDutyTime(std::chrono::milliseconds::zero());
     ringing_ = false;
-    kLog.info("silenced");
+    log.info("silenced");
 }
 
-bool BellController::is_ringing() const { return ringing_; }
+bool BellController::isRinging() const { return ringing_; }
 
-void BellController::ring_for(std::chrono::milliseconds duration, core::EventLoop& loop) {
+void BellController::ringFor(std::chrono::milliseconds duration, core::EventLoop& loop) {
     ring();
-    loop.add_timer(duration, /*repeat=*/false, [this] { silence(); });
+    loop.addTimer(duration, /*repeat=*/false, [this] { silence(); });
 }
 
 } // namespace icom::hw

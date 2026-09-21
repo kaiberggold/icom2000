@@ -1,35 +1,50 @@
 #pragma once
 
 #include "icom/core/event_loop.hpp"
-#include "icom/gpio/digital_pin.hpp"
+#include "icom/hw/pwm.hpp"
 
+#include <chrono>
 #include <memory>
 
 namespace icom::hw {
 
-// The concrete "one working digital pin" example: a door bell relay/buzzer
-// driven by a single GPIO output. Deliberately the simplest possible
-// component so it's easy to read end-to-end -- see Tcm1171Controller for
-// how a stateful, event-driven component built on the same OutputPin/
-// InputPin interfaces would look.
+// A door bell relay/buzzer, driven via software PWM (icom::hw::Pwm)
+// rather than a plain on/off GPIO write -- ring()/silence() just move the
+// PWM's duty time between `ringDutyTime` (constructor parameter) and
+// zero, so callers see the same simple two-state API as a plain digital
+// pin (this used to BE just one OutputPin; see Tcm1171Controller for how
+// a stateful, event-driven component built directly on OutputPin/InputPin
+// would look). PWM matters here because the bell is a relay/buzzer, not a
+// clean digital load: driving it at less than 100% duty controls how
+// hard it strikes/how loud it buzzes, and continuous full-power drive on
+// some relay coils is exactly the kind of thing that overheats them.
 class BellController {
 public:
-    // `pin` is expected to be wired active-high into a relay/MOSFET driving
-    // the bell -- flip the ring()/silence() bodies if your board is
-    // active-low.
-    explicit BellController(std::unique_ptr<gpio::OutputPin> pin);
+    // `pwm` should already be constructed on a icom::core::LoopThread's
+    // loop (see that class), not the daemon's main one -- see
+    // docs/ARCHITECTURE.md "Software PWM" for why. `ringDutyTime`,
+    // clamped to `pwm`'s period, is what ring() drives the duty to;
+    // defaulting it to the full period reproduces the old plain-digital
+    // "just turn it on" behavior for anyone who hasn't tuned it yet.
+    explicit BellController(std::unique_ptr<Pwm> pwm,
+                            std::chrono::milliseconds ringDutyTime = std::chrono::milliseconds::max());
 
     void ring();
     void silence();
-    bool is_ringing() const;
+    bool isRinging() const;
 
     // Convenience for "ring for exactly this long": schedules silence() on
     // the given EventLoop. The loop must outlive the returned call, i.e.
-    // don't call this after the loop has stopped for good.
-    void ring_for(std::chrono::milliseconds duration, core::EventLoop& loop);
+    // don't call this after the loop has stopped for good. This is a
+    // SEPARATE loop/timer from the PWM's own cycling -- just "when to stop
+    // ringing", low-frequency enough that the daemon's main loop is the
+    // right place for it (see Pwm's own header for why the PWM cycle
+    // itself needs a dedicated loop and this doesn't).
+    void ringFor(std::chrono::milliseconds duration, core::EventLoop& loop);
 
 private:
-    std::unique_ptr<gpio::OutputPin> pin_;
+    std::unique_ptr<Pwm> pwm_;
+    std::chrono::milliseconds ringDutyTime_;
     bool ringing_ = false;
 };
 

@@ -28,6 +28,6 @@ using CommandHandler = std::function<CommandResult(const std::vector<std::string
 // enough to type by hand" goal above.
 std::vector<std::string> tokenize(std::string_view line);
 
-std::string format_response(const CommandResult& result);
+std::string formatResponse(const CommandResult& result);
 
 } // namespace icom::ipc

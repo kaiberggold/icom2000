@@ -16,7 +16,7 @@ namespace icom::ipc {
 // not touching this file.
 class ControlServer {
 public:
-    ControlServer(std::string socket_path, core::EventLoop& loop);
+    ControlServer(std::string socketPath, core::EventLoop& loop);
     ~ControlServer();
 
     ControlServer(const ControlServer&) = delete;
@@ -24,23 +24,23 @@ public:
 
     // Case-insensitive; last registration for a given name wins. Safe to
     // call before or after start().
-    void register_command(std::string name, CommandHandler handler);
+    void registerCommand(std::string name, CommandHandler handler);
 
     // Creates, binds (removing a stale socket file first) and listens on
-    // socket_path, and registers the listening fd with the EventLoop.
+    // socketPath, and registers the listening fd with the EventLoop.
     void start();
 
 private:
-    void on_listen_readable(short revents);
-    void on_client_readable(int client_fd, short revents);
-    void close_client(int client_fd);
-    void handle_line(int client_fd, std::string_view line);
+    void onListenReadable(short revents);
+    void onClientReadable(int clientFd, short revents);
+    void closeClient(int clientFd);
+    void handleLine(int clientFd, std::string_view line);
 
-    std::string socket_path_;
+    std::string socketPath_;
     core::EventLoop& loop_;
-    int listen_fd_ = -1;
+    int listenFd_ = -1;
     std::unordered_map<std::string, CommandHandler> handlers_;
-    std::unordered_map<int, std::string> read_buffers_;
+    std::unordered_map<int, std::string> readBuffers_;
 };
 
 } // namespace icom::ipc

@@ -13,7 +13,7 @@
 namespace icom::core {
 
 SignalWatcher::SignalWatcher(EventLoop& loop, std::initializer_list<int> signals,
-                              std::function<void(int)> on_signal)
+                             std::function<void(int)> onSignal)
     : loop_(loop) {
     sigset_t mask;
     sigemptyset(&mask);
@@ -30,7 +30,7 @@ SignalWatcher::SignalWatcher(EventLoop& loop, std::initializer_list<int> signals
         throw std::runtime_error(std::string("signalfd() failed: ") + std::strerror(errno));
     }
 
-    loop_.add_fd(fd_, POLLIN, [this, cb = std::move(on_signal)](short) {
+    loop_.addFd(fd_, POLLIN, [this, cb = std::move(onSignal)](short) {
         signalfd_siginfo info{};
         while (::read(fd_, &info, sizeof(info)) == sizeof(info)) {
             cb(static_cast<int>(info.ssi_signo));
@@ -40,7 +40,7 @@ SignalWatcher::SignalWatcher(EventLoop& loop, std::initializer_list<int> signals
 
 SignalWatcher::~SignalWatcher() {
     if (fd_ >= 0) {
-        loop_.remove_fd(fd_);
+        loop_.removeFd(fd_);
         ::close(fd_);
     }
 }

@@ -21,6 +21,12 @@ endif()
 option(ICOM_WITH_LIBGPIOD "Build the libgpiod-backed GPIO backend for target hardware" OFF)
 option(ICOM_BUILD_TESTS "Build the unit test suite" ON)
 
+# icom::core::LoopThread wraps std::jthread -- glibc's libstdc++ needs
+# -lpthread linked in for the actual thread creation syscalls underneath
+# std::thread/std::jthread, even though nothing here calls pthread_*
+# directly.
+find_package(Threads REQUIRED)
+
 # Shared warning flags as an INTERFACE target rather than sprinkled into
 # every module's CMakeLists, so tightening them later is a one-line change.
 add_library(icom_warnings INTERFACE)

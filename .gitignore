@@ -58,6 +58,11 @@ compile_commands.json
 *.bak
 *.swp
 
+# astyle's own pre-format backup (created when run with --suffix, or the
+# CLI default; the VS Code extension's format-on-save doesn't produce
+# these, only a manual `astyle` invocation from the command line does)
+*.orig
+
 # vcpkg
 vcpkg_installed/
 

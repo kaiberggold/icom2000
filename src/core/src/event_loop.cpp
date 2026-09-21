@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <cerrno>
 #include <cstring>
+#include <ctime>
+#include <mutex>
 #include <stdexcept>
 #include <unordered_map>
 #include <vector>
@@ -17,116 +19,157 @@ namespace icom::core {
 
 namespace {
 
-Logger& kLog = get_logger("core.event_loop");
+Logger& log = getLogger("core.event_loop");
 
-void throw_errno(std::string_view what) {
+void throwErrno(std::string_view what) {
     throw std::runtime_error(std::string(what) + ": " + std::strerror(errno));
+}
+
+// The one place a chrono duration gets translated into the POSIX
+// {seconds, nanoseconds} pair timerfd_settime() wants, so the narrowing
+// casts (chrono's rep is a 64-bit count on every platform this targets;
+// timespec::tv_sec/tv_nsec are not, notably tv_nsec is a 32-bit `long` on
+// ARM32) live in one named function instead of two unchecked field
+// assignments at the call site.
+timespec toTimespec(std::chrono::nanoseconds duration) {
+    using namespace std::chrono;
+    const auto secs = duration_cast<seconds>(duration);
+    return timespec{static_cast<std::time_t>(secs.count()),
+                    static_cast<long>((duration - secs).count())};
 }
 
 } // namespace
 
 struct EventLoop::Impl {
     std::vector<pollfd> pollfds;
-    std::unordered_map<int, FdCallback> fd_callbacks;
-    std::unordered_map<TimerId, int> timer_fd_by_id;
-    TimerId next_timer_id = 1;
-    int wake_fd = -1;
+    std::unordered_map<int, FdCallback> fdCallbacks;
+    std::unordered_map<TimerId, int> timerFdById;
+    TimerId nextTimerId = 1;
+    int wakeFd = -1;
     bool running = false;
 
-    void add_fd_locked(int fd, short events, FdCallback cb) {
+    // Cross-thread handoff for post(): the ONLY state in this whole class
+    // another thread is allowed to touch, which is why it's the only
+    // member with its own mutex -- everything else here is exclusively
+    // read/written from whichever thread is inside run().
+    std::mutex postMutex;
+    std::vector<std::function<void()>> pending;
+
+    void addFdLocked(int fd, short events, FdCallback cb) {
         pollfds.push_back(pollfd{fd, events, 0});
-        fd_callbacks.emplace(fd, std::move(cb));
+        fdCallbacks.emplace(fd, std::move(cb));
     }
 
-    void remove_fd_locked(int fd) {
-        std::erase_if(pollfds, [fd](const pollfd& p) { return p.fd == fd; });
-        fd_callbacks.erase(fd);
+    void removeFdLocked(int fd) {
+        std::erase_if(pollfds, [fd](const pollfd & p) { return p.fd == fd; });
+        fdCallbacks.erase(fd);
+    }
+
+    void wake() {
+        std::uint64_t one = 1;
+        // Best-effort: if this races with destruction the fd may already
+        // be gone, which is fine -- there is nothing left to wake.
+        (void)::write(wakeFd, &one, sizeof(one));
     }
 };
 
 EventLoop::EventLoop() : impl_(std::make_unique<Impl>()) {
-    impl_->wake_fd = eventfd(0, EFD_NONBLOCK);
-    if (impl_->wake_fd < 0) {
-        throw_errno("eventfd() failed");
+    impl_->wakeFd = eventfd(0, EFD_NONBLOCK);
+    if (impl_->wakeFd < 0) {
+        throwErrno("eventfd() failed");
     }
-    impl_->add_fd_locked(impl_->wake_fd, POLLIN, [this](short) {
+    impl_->addFdLocked(impl_->wakeFd, POLLIN, [this](short) {
         std::uint64_t drain = 0;
-        // Just a wakeup signal; the loop re-checks `running` on its own.
-        while (::read(impl_->wake_fd, &drain, sizeof(drain)) > 0) {
+        // Just a wakeup signal; drain the counter, then run whatever
+        // post() queued up (possibly nothing, if this wake was only
+        // stop() asking run() to re-check `running`).
+        while (::read(impl_->wakeFd, &drain, sizeof(drain)) > 0) {
+        }
+        std::vector<std::function<void()>> tasks;
+        {
+            std::lock_guard lock(impl_->postMutex);
+            tasks.swap(impl_->pending);
+        }
+        for (auto& task : tasks) {
+            task();
         }
     });
 }
 
 EventLoop::~EventLoop() {
-    if (impl_->wake_fd >= 0) {
-        ::close(impl_->wake_fd);
+    if (impl_->wakeFd >= 0) {
+        ::close(impl_->wakeFd);
     }
-    for (auto& [id, fd] : impl_->timer_fd_by_id) {
+    for (auto& [id, fd] : impl_->timerFdById) {
         ::close(fd);
     }
 }
 
-void EventLoop::add_fd(int fd, short events, FdCallback callback) {
-    impl_->add_fd_locked(fd, events, std::move(callback));
+void EventLoop::addFd(int fd, short events, FdCallback callback) {
+    impl_->addFdLocked(fd, events, std::move(callback));
 }
 
-void EventLoop::remove_fd(int fd) { impl_->remove_fd_locked(fd); }
+void EventLoop::removeFd(int fd) { impl_->removeFdLocked(fd); }
 
-EventLoop::TimerId EventLoop::add_timer(std::chrono::milliseconds interval, bool repeat,
-                                         TimerCallback callback) {
+EventLoop::TimerId EventLoop::addTimer(std::chrono::milliseconds interval, bool repeat,
+                                       TimerCallback callback) {
     const int fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK);
     if (fd < 0) {
-        throw_errno("timerfd_create() failed");
+        throwErrno("timerfd_create() failed");
     }
 
-    const auto secs = std::chrono::duration_cast<std::chrono::seconds>(interval);
-    const auto nsecs = std::chrono::duration_cast<std::chrono::nanoseconds>(interval - secs);
-
     itimerspec spec{};
-    spec.it_value.tv_sec = secs.count();
-    spec.it_value.tv_nsec = nsecs.count();
+    spec.it_value = toTimespec(std::chrono::duration_cast<std::chrono::nanoseconds>(interval));
     if (repeat) {
         spec.it_interval = spec.it_value;
     }
     if (timerfd_settime(fd, 0, &spec, nullptr) != 0) {
         ::close(fd);
-        throw_errno("timerfd_settime() failed");
+        throwErrno("timerfd_settime() failed");
     }
 
-    const TimerId id = impl_->next_timer_id++;
-    impl_->timer_fd_by_id.emplace(id, fd);
+    const TimerId id = impl_->nextTimerId++;
+    impl_->timerFdById.emplace(id, fd);
 
-    impl_->add_fd_locked(fd, POLLIN, [this, fd, repeat, cb = std::move(callback)](short) {
+    impl_->addFdLocked(fd, POLLIN, [this, fd, repeat, cb = std::move(callback)](short) {
         std::uint64_t expirations = 0;
         if (::read(fd, &expirations, sizeof(expirations)) <= 0) {
             return; // spurious wakeup or already disarmed
         }
         cb();
         if (!repeat) {
-            remove_fd(fd);
+            removeFd(fd);
             ::close(fd);
-            std::erase_if(impl_->timer_fd_by_id, [fd](const auto& kv) { return kv.second == fd; });
+            std::erase_if(impl_->timerFdById, [fd](const auto & kv) { return kv.second == fd; });
         }
     });
 
     return id;
 }
 
-void EventLoop::remove_timer(TimerId id) {
-    auto it = impl_->timer_fd_by_id.find(id);
-    if (it == impl_->timer_fd_by_id.end()) {
+void EventLoop::post(std::function<void()> fn) {
+    {
+        std::lock_guard lock(impl_->postMutex);
+        impl_->pending.push_back(std::move(fn));
+    }
+    impl_->wake();
+}
+
+void EventLoop::removeTimer(TimerId id) {
+    auto it = impl_->timerFdById.find(id);
+    if (it == impl_->timerFdById.end()) {
         return;
     }
     const int fd = it->second;
-    remove_fd(fd);
+    removeFd(fd);
     ::close(fd);
-    impl_->timer_fd_by_id.erase(it);
+    impl_->timerFdById.erase(it);
 }
 
 void EventLoop::run(std::stop_token token) {
     impl_->running = true;
 
-    std::stop_callback wake_on_stop(token, [this] { stop(); });
+    std::stop_callback wakeOnStop(token, [this] { stop(); });
 
     while (impl_->running) {
         // Snapshot: a callback may add/remove fds (e.g. accept() adding a
@@ -139,7 +182,7 @@ void EventLoop::run(std::stop_token token) {
             if (errno == EINTR) {
                 continue;
             }
-            kLog.error(std::string("poll() failed: ") + std::strerror(errno));
+            log.error(std::string("poll() failed: ") + std::strerror(errno));
             break;
         }
 
@@ -147,12 +190,12 @@ void EventLoop::run(std::stop_token token) {
             if (pfd.revents == 0) {
                 continue;
             }
-            auto it = impl_->fd_callbacks.find(pfd.fd);
-            if (it == impl_->fd_callbacks.end()) {
+            auto it = impl_->fdCallbacks.find(pfd.fd);
+            if (it == impl_->fdCallbacks.end()) {
                 continue; // removed by an earlier callback in this same batch
             }
             // Copy out rather than invoking through the map reference: a
-            // callback is allowed to remove_fd() its own fd (one-shot
+            // callback is allowed to removeFd() its own fd (one-shot
             // timers do exactly this), which erases -- and so destroys --
             // the std::function it->second refers to. Invoking through a
             // reference into an object that gets destroyed mid-call is
@@ -171,10 +214,7 @@ void EventLoop::run(std::stop_token token) {
 
 void EventLoop::stop() {
     impl_->running = false;
-    std::uint64_t one = 1;
-    // Best-effort: if this races with destruction the fd may already be
-    // gone, which is fine -- there is nothing left to wake.
-    (void)::write(impl_->wake_fd, &one, sizeof(one));
+    impl_->wake();
 }
 
 } // namespace icom::core
