@@ -1,14 +1,23 @@
 // Covers icom::hw::StatusLed against the mock GPIO backend: on()/off()
-// track drivenLevel() correctly, and blinkNTimes() actually performs
-// the right number of on/off transitions via the EventLoop rather than
-// blocking the caller. See docs/ARCHITECTURE.md "Hardware layer".
+// track drivenLevel() correctly, and blinkNTimes() actually performs the
+// right number of on/off transitions via a real background LoopThread
+// (matching how daemon_main.cpp actually uses it) rather than blocking
+// the caller. See docs/ARCHITECTURE.md "Software PWM" and StatusLed's own
+// header comment for why blinkNTimes() against a LoopThread -- not the
+// daemon's main loop -- is the case that actually needs covering here:
+// ~StatusLed() requires whatever loop it last blinked on to still be
+// actively running at destruction time, which only a LoopThread's own
+// loop guarantees.
 #include "check.hpp"
 
 #include "icom/core/event_loop.hpp"
+#include "icom/core/loop_thread.hpp"
 #include "icom/gpio/mock_backend.hpp"
 #include "icom/hw/status_led.hpp"
 
 #include <chrono>
+#include <condition_variable>
+#include <mutex>
 
 using namespace icom;
 
@@ -64,14 +73,12 @@ void testBlinkNTimesIsANoopForZero() {
     auto pin = backend.requestOutput(gpio::PinConfig{"mockchip0", 23, "test-led"}, gpio::Level::LOW);
 
     hw::StatusLed led(std::move(pin));
+    // Never run() -- blinkNTimes(0, ...) must return without ever
+    // touching `loop` at all (confirmed by this test not hanging in
+    // ~StatusLed(), which only waits on a loop it actually used).
     core::EventLoop loop;
     led.blinkNTimes(0, loop);
 
-    // Nothing scheduled -- confirmed by not hanging: stop immediately via a
-    // timer that would only be needed if blinkNTimes had (wrongly)
-    // scheduled something.
-    loop.addTimer(std::chrono::milliseconds(5), /*repeat=*/false, [&] { loop.stop(); });
-    loop.run();
     CHECK(!led.isOn());
 }
 
@@ -83,20 +90,39 @@ void testBlinkNTimesPerformsExactlyNOnOffCycles() {
     auto countingPin = std::make_unique<CountingOutputPin>(std::move(pin), writeCount);
     const gpio::OutputPin* raw = countingPin.get();
 
+    // Declared before `led` (so destroyed after it): ~StatusLed() needs
+    // this loop still actively running when it tears down, which only
+    // holds while `background`'s own thread is still alive.
+    core::LoopThread background;
     hw::StatusLed led(std::move(countingPin));
     writeCount = 0; // discard the constructor's own initial write(Low)
-    core::EventLoop loop;
 
     constexpr unsigned BLINKS = 3;
-    led.blinkNTimes(BLINKS, loop, std::chrono::milliseconds(1), std::chrono::milliseconds(1));
 
-    // Safety net well past the ~2*BLINKS ms the sequence needs, in case a
-    // regression breaks self-termination and would otherwise hang the
-    // suite; also the only thing that stops the loop on the happy path,
-    // since blinkNTimes() itself never calls loop.stop().
-    loop.addTimer(std::chrono::milliseconds(200), /*repeat=*/false, [&] { loop.stop(); });
-    loop.run();
+    // blinkNTimes() must be called from `background`'s own thread (per
+    // its contract), so post() it there; it doesn't itself report
+    // completion, so a trailing timer -- scheduled well after the
+    // ~2*BLINKS ms the sequence needs -- doubles as the completion signal
+    // and the safety net that keeps this test from hanging if a
+    // regression breaks self-termination.
+    std::mutex m;
+    std::condition_variable cv;
+    bool sequenceDone = false;
+    background.loop().post([&] {
+        led.blinkNTimes(BLINKS, background.loop(), std::chrono::milliseconds(1),
+                        std::chrono::milliseconds(1));
+        background.loop().addTimer(std::chrono::milliseconds(100), /*repeat=*/false, [&] {
+            std::lock_guard lock(m);
+            sequenceDone = true;
+            cv.notify_one();
+        });
+    });
 
+    std::unique_lock lock(m);
+    const bool finished = cv.wait_for(lock, std::chrono::seconds(2), [&] { return sequenceDone; });
+    lock.unlock();
+
+    CHECK(finished);
     CHECK(writeCount == static_cast<int>(BLINKS) * 2); // one write() per on and per off
     CHECK(!led.isOn());
     CHECK(raw->drivenLevel() == gpio::Level::LOW);

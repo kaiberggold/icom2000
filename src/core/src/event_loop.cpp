@@ -5,6 +5,7 @@
 #include <cerrno>
 #include <cstring>
 #include <ctime>
+#include <mutex>
 #include <stdexcept>
 #include <unordered_map>
 #include <vector>
@@ -47,6 +48,13 @@ struct EventLoop::Impl {
     int wakeFd = -1;
     bool running = false;
 
+    // Cross-thread handoff for post(): the ONLY state in this whole class
+    // another thread is allowed to touch, which is why it's the only
+    // member with its own mutex -- everything else here is exclusively
+    // read/written from whichever thread is inside run().
+    std::mutex postMutex;
+    std::vector<std::function<void()>> pending;
+
     void addFdLocked(int fd, short events, FdCallback cb) {
         pollfds.push_back(pollfd{fd, events, 0});
         fdCallbacks.emplace(fd, std::move(cb));
@@ -55,6 +63,13 @@ struct EventLoop::Impl {
     void removeFdLocked(int fd) {
         std::erase_if(pollfds, [fd](const pollfd & p) { return p.fd == fd; });
         fdCallbacks.erase(fd);
+    }
+
+    void wake() {
+        std::uint64_t one = 1;
+        // Best-effort: if this races with destruction the fd may already
+        // be gone, which is fine -- there is nothing left to wake.
+        (void)::write(wakeFd, &one, sizeof(one));
     }
 };
 
@@ -65,8 +80,18 @@ EventLoop::EventLoop() : impl_(std::make_unique<Impl>()) {
     }
     impl_->addFdLocked(impl_->wakeFd, POLLIN, [this](short) {
         std::uint64_t drain = 0;
-        // Just a wakeup signal; the loop re-checks `running` on its own.
+        // Just a wakeup signal; drain the counter, then run whatever
+        // post() queued up (possibly nothing, if this wake was only
+        // stop() asking run() to re-check `running`).
         while (::read(impl_->wakeFd, &drain, sizeof(drain)) > 0) {
+        }
+        std::vector<std::function<void()>> tasks;
+        {
+            std::lock_guard lock(impl_->postMutex);
+            tasks.swap(impl_->pending);
+        }
+        for (auto& task : tasks) {
+            task();
         }
     });
 }
@@ -120,6 +145,14 @@ EventLoop::TimerId EventLoop::addTimer(std::chrono::milliseconds interval, bool 
     });
 
     return id;
+}
+
+void EventLoop::post(std::function<void()> fn) {
+    {
+        std::lock_guard lock(impl_->postMutex);
+        impl_->pending.push_back(std::move(fn));
+    }
+    impl_->wake();
 }
 
 void EventLoop::removeTimer(TimerId id) {
@@ -181,10 +214,7 @@ void EventLoop::run(std::stop_token token) {
 
 void EventLoop::stop() {
     impl_->running = false;
-    std::uint64_t one = 1;
-    // Best-effort: if this races with destruction the fd may already be
-    // gone, which is fine -- there is nothing left to wake.
-    (void)::write(impl_->wakeFd, &one, sizeof(one));
+    impl_->wake();
 }
 
 } // namespace icom::core

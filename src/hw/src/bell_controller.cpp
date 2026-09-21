@@ -1,24 +1,27 @@
 #include "icom/hw/bell_controller.hpp"
 #include "icom/core/logger.hpp"
 
+#include <algorithm>
+
 namespace icom::hw {
 
 namespace {
 core::Logger& log = core::getLogger("hw.bell");
 } // namespace
 
-BellController::BellController(std::unique_ptr<gpio::OutputPin> pin) : pin_(std::move(pin)) {
-    pin_->write(gpio::Level::LOW);
-}
+BellController::BellController(std::unique_ptr<Pwm> pwm, std::chrono::milliseconds ringDutyTime)
+    : pwm_(std::move(pwm)),
+      ringDutyTime_(std::clamp(ringDutyTime, std::chrono::milliseconds::zero(), pwm_->period())) {}
 
 void BellController::ring() {
-    pin_->write(gpio::Level::HIGH);
+    pwm_->setDutyTime(ringDutyTime_);
     ringing_ = true;
-    log.info("ringing");
+    log.info("ringing (duty=" + std::to_string(ringDutyTime_.count()) + "/" +
+             std::to_string(pwm_->period().count()) + "ms)");
 }
 
 void BellController::silence() {
-    pin_->write(gpio::Level::LOW);
+    pwm_->setDutyTime(std::chrono::milliseconds::zero());
     ringing_ = false;
     log.info("silenced");
 }

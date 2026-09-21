@@ -8,10 +8,15 @@
 
 namespace icom::core {
 
-// Single-threaded reactor: everything in the daemon (GPIO edge events, the
-// control socket, timers) is a file descriptor that gets multiplexed with
-// poll(). See docs/ARCHITECTURE.md "Run model" for why this beats a
-// thread-per-component design on a single-core Pi Zero.
+// Single-threaded reactor: everything given to one EventLoop (GPIO edge
+// events, the control socket, timers) is a file descriptor that gets
+// multiplexed with poll() on whichever one thread calls run(). See
+// docs/ARCHITECTURE.md "Run model" for why this beats a thread-per-
+// component design on a single-core Pi Zero, and "Software PWM" for the
+// one deliberate exception: a second EventLoop, on a second thread
+// (LoopThread), for periodic work the main one shouldn't have to wait its
+// turn for. post() (below) is what makes talking to that second loop from
+// the main thread safe.
 //
 // poll() rather than epoll(): the fd count here is a handful (gpio chip,
 // listening socket, a few client connections, a couple of timers), so
@@ -41,6 +46,17 @@ public:
     // reactor rather than a separate subsystem.
     TimerId addTimer(std::chrono::milliseconds interval, bool repeat, TimerCallback callback);
     void removeTimer(TimerId id);
+
+    // The one EventLoop operation safe to call from a thread OTHER than
+    // whichever one is running this loop's run() (see LoopThread,
+    // icom/core/loop_thread.hpp, for the intended use: a second EventLoop
+    // on its own dedicated thread for timing-sensitive periodic work like
+    // software PWM). `fn` runs on the loop's own thread, asynchronously --
+    // post() itself returns immediately, before `fn` has necessarily run.
+    // Every other method here (addFd, addTimer, ...) is NOT thread-safe;
+    // call them only from the loop's own thread, which is exactly what a
+    // callback running via post() (or any other EventLoop callback) is.
+    void post(std::function<void()> fn);
 
     // Blocks, dispatching callbacks, until stop() is called or `token` is
     // cancelled. Safe to call stop() from another thread (e.g. a signal

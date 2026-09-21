@@ -6,9 +6,11 @@
 #include "icom/config/station_registry.hpp"
 #include "icom/core/event_loop.hpp"
 #include "icom/core/logger.hpp"
+#include "icom/core/loop_thread.hpp"
 #include "icom/core/signal_watcher.hpp"
 #include "icom/gpio/digital_pin.hpp"
 #include "icom/hw/bell_controller.hpp"
+#include "icom/hw/pwm.hpp"
 #include "icom/hw/status_led.hpp"
 #include "icom/hw/tcm1171_controller.hpp"
 #include "icom/audio/audio_engine.hpp"
@@ -27,12 +29,14 @@
 #include <vector>
 
 using icom::core::EventLoop;
+using icom::core::LoopThread;
 using icom::core::SignalWatcher;
 using icom::gpio::Edge;
 using icom::gpio::Level;
 using icom::gpio::PinConfig;
 using icom::hw::BellController;
 using icom::hw::LineState;
+using icom::hw::Pwm;
 using icom::hw::StatusLed;
 using icom::hw::Tcm1171Controller;
 using icom::ipc::CommandResult;
@@ -162,8 +166,17 @@ int main(int argc, char** argv) {
     unsigned polarityLine = 22;
     unsigned hookDetectLine = 6;
     unsigned statusLedLine = 23; // Codec Zero's own green status LED
+    // The bell is driven via software PWM (icom::hw::Pwm), not a plain
+    // digital on/off -- see docs/ARCHITECTURE.md "Software PWM". Default
+    // duty == period (100%) reproduces the old plain-on/off behavior
+    // exactly for anyone who hasn't tuned these; lower the duty to make
+    // ring() strike/buzz gentler (and draw less current) instead.
+    unsigned pwmPeriodMs = 10;
+    unsigned pwmDutyMs = 10;
     try {
         bellPinLine = config.getUint("gpio.bell", "line", bellPinLine);
+        pwmPeriodMs = config.getUint("gpio.bell", "pwm_period_ms", pwmPeriodMs);
+        pwmDutyMs = config.getUint("gpio.bell", "pwm_duty_ms", pwmDutyMs);
         ringModeLine = config.getUint("gpio.tcm1171", "ring_mode_line", ringModeLine);
         polarityLine = config.getUint("gpio.tcm1171", "polarity_line", polarityLine);
         hookDetectLine = config.getUint("gpio.tcm1171", "hook_detect_line", hookDetectLine);
@@ -199,10 +212,31 @@ int main(int argc, char** argv) {
         loop.stop();
     });
 
+    // A second EventLoop, on its own thread, for timing-sensitive
+    // periodic work that shouldn't have to wait its turn behind whatever
+    // the main loop (`loop`, above) is doing -- the bell's PWM cycle and
+    // the status LED's blink sequence both live here now. See
+    // icom/core/loop_thread.hpp and docs/ARCHITECTURE.md "Software PWM".
+    // Declared before anything that depends on it (bell/its Pwm below) so
+    // it's the LAST thing destroyed at shutdown, not the first -- C++
+    // destroys locals in reverse declaration order. Also declared after
+    // SignalWatcher on purpose: SignalWatcher blocks SIGINT/SIGTERM via
+    // sigprocmask() on THIS (the main) thread specifically, and a newly
+    // created thread inherits its creator's signal mask at creation time
+    // -- so backgroundLoop's own thread needs to come into existence
+    // *after* that block is in place, or the kernel could just as easily
+    // deliver the signal to backgroundLoop's thread instead, which
+    // installs no handler for it and would take the default
+    // (terminate-the-process) action.
+    LoopThread backgroundLoop;
+
     auto gpioBackend = icom::gpio::makeDefaultBackend();
 
     BellController bell(
-        gpioBackend->requestOutput(PinConfig{gpioChip, bellPinLine, "icom2000-bell"}, Level::LOW));
+        std::make_unique<Pwm>(
+            gpioBackend->requestOutput(PinConfig{gpioChip, bellPinLine, "icom2000-bell"}, Level::LOW),
+            backgroundLoop.loop(), std::chrono::milliseconds(pwmPeriodMs)),
+        std::chrono::milliseconds(pwmDutyMs));
 
     Tcm1171Controller line(
     Tcm1171Controller::Pins{
@@ -216,7 +250,7 @@ int main(int argc, char** argv) {
     loop);
 
     StatusLed statusLed(gpioBackend->requestOutput(
-        PinConfig{gpioChip, statusLedLine, "icom2000-status-led"}, Level::LOW));
+                            PinConfig{gpioChip, statusLedLine, "icom2000-status-led"}, Level::LOW));
 
     auto audio = icom::audio::makeNullEngine(stations);
     audio->start();
@@ -259,9 +293,14 @@ int main(int argc, char** argv) {
     server.start();
 
     // Visual "the daemon is up and its main loop is about to start"
-    // signal -- fire-and-forget, scheduled on `loop` itself rather than
-    // blocking startup for the ~300ms the full sequence takes.
-    statusLed.blinkNTimes(3, loop, 50ms, 50ms);
+    // signal -- fire-and-forget, and now shares backgroundLoop with the
+    // bell's PWM cycle rather than running on the main loop: post() is
+    // the only backgroundLoop.loop() operation safe to call from here
+    // (the main thread), so the actual blinkNTimes() call has to happen
+    // inside the posted lambda, on that loop's own thread.
+    backgroundLoop.loop().post([&statusLed, &backgroundLoop] {
+        statusLed.blinkNTimes(3, backgroundLoop.loop(), 50ms, 50ms);
+    });
 
     log.info("ready");
     loop.run();

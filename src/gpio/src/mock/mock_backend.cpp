@@ -1,6 +1,7 @@
 #include "icom/gpio/mock_backend.hpp"
 #include "icom/core/logger.hpp"
 
+#include <atomic>
 #include <deque>
 #include <mutex>
 #include <utility>
@@ -17,12 +18,18 @@ public:
     explicit MockOutputPin(PinConfig config, Level initial)
         : config_(std::move(config)), level_(initial) {}
 
-    void write(Level level) override { level_ = level; }
-    Level drivenLevel() const override { return level_; }
+    // atomic, not a plain Level: icom::hw::Pwm writes to pins from its own
+    // dedicated thread (see icom/core/loop_thread.hpp), so a pin this
+    // project hands to it -- directly, or by way of StatusLed's
+    // blinkNTimes() pointed at that same loop -- gets written from a
+    // different thread than whichever one constructed it or might read
+    // drivenLevel() back.
+    void write(Level level) override { level_.store(level); }
+    Level drivenLevel() const override { return level_.load(); }
 
 private:
     PinConfig config_;
-    Level level_;
+    std::atomic<Level> level_;
 };
 
 class MockInputPin final : public InputPin {

@@ -8,6 +8,7 @@
 #include "gpiod_backend.hpp"
 #include "icom/core/logger.hpp"
 
+#include <atomic>
 #include <chrono>
 #include <stdexcept>
 #include <string>
@@ -49,18 +50,20 @@ public:
     GpiodOutputPin(::gpiod::line_request request, unsigned line, Level initial)
         : request_(std::move(request)), line_(line), driven_(initial) {}
 
+    // atomic: see MockOutputPin's own comment (mock_backend.cpp) -- same
+    // reasoning applies here, this is just the other backend.
     void write(Level level) override {
         request_.set_value(line_, level == Level::HIGH ? ::gpiod::line::value::ACTIVE
                            : ::gpiod::line::value::INACTIVE);
-        driven_ = level;
+        driven_.store(level);
     }
 
-    Level drivenLevel() const override { return driven_; }
+    Level drivenLevel() const override { return driven_.load(); }
 
 private:
     ::gpiod::line_request request_;
     unsigned line_;
-    Level driven_;
+    std::atomic<Level> driven_;
 };
 
 class GpiodInputPin final : public InputPin {

@@ -82,10 +82,10 @@ setup and how the remote-debug flow works.
 ## Layout
 
 ```
-src/core/   reactor (EventLoop), signal handling, logging
+src/core/   reactor (EventLoop) + LoopThread, signal handling, logging
 src/config/ File (INI-style config reader), StationRegistry
 src/gpio/   OutputPin/InputPin interfaces + mock and libgpiod backends
-src/hw/     BellController, Tcm1171Controller
+src/hw/     Pwm (software PWM), BellController, StatusLed, Tcm1171Controller
 src/audio/  Engine interface (stubbed -- see docs/ARCHITECTURE.md)
 src/ipc/    Unix-socket control protocol + server
 src/app/    intercomd (composition root)

@@ -23,16 +23,18 @@ connecting real hardware.
 ## Module layout
 
 ```
-src/core/   EventLoop (reactor), SignalWatcher, logging -- no hardware
-            or GPIO knowledge at all.
+src/core/   EventLoop (reactor) + LoopThread (an EventLoop on its own
+            thread), SignalWatcher, logging -- no hardware or GPIO
+            knowledge at all.
 src/config/ File (INI-style reader) + StationRegistry -- see
             "Configuration" below. No hardware knowledge either.
 src/gpio/   OutputPin/InputPin/Backend interfaces, plus two
             implementations: MockBackend (in-process, for host dev/tests)
             and GpiodBackend (libgpiod, for target hardware).
-src/hw/     Domain logic built only on the gpio interfaces: BellController
-            (the simple end-to-end example) and Tcm1171Controller (the
-            stateful, event-driven example).
+src/hw/     Domain logic built only on the gpio interfaces: Pwm (software
+            PWM, see "Software PWM" below) + BellController built on it,
+            StatusLed, and Tcm1171Controller (the stateful, event-driven
+            example).
 src/audio/  Engine interface + a no-op NullEngine. Real ALSA
             code is a later pass -- see "Audio boundary" below.
 src/ipc/    The Unix-socket control protocol and its server.
@@ -40,8 +42,9 @@ src/app/    daemon_main.cpp -- the composition root. Everything above is
             constructed and wired together here; nothing else in the tree
             knows this file exists.
 src/cli/    intercomctl -- a thin client over src/ipc's protocol.
-tests/      Host-only unit tests (EventLoop + MockBackend + File +
-            the architecture-invariants guard script, see "Testing").
+tests/      Host-only unit tests (EventLoop + LoopThread + MockBackend +
+            File + StatusLed + Pwm + the architecture-invariants guard
+            script, see "Testing").
 config/     Deployment configuration -- see "Configuration" below.
 ```
 
@@ -69,9 +72,14 @@ how that's actually enforced.
 
 ## Run model
 
-`intercomd` is single-threaded and reactor-based (`icom::core::EventLoop`,
-`src/core/include/icom/core/event_loop.hpp`). Every source of work is a
-file descriptor:
+`intercomd` is reactor-based (`icom::core::EventLoop`,
+`src/core/include/icom/core/event_loop.hpp`) on its main thread, plus one
+second thread running a second, independent `EventLoop` for the small
+amount of timing-sensitive periodic work that shouldn't have to wait its
+turn on the main one -- see "Software PWM" below for what that's for and
+why. Everything else in this section describes the main loop; the second
+thread is deliberately kept minimal and is covered separately. On the main
+loop, every source of work is a file descriptor:
 
 - the TCM1171 hook-detect GPIO line's edge-event fd (from libgpiod, or the
   mock backend's eventfd),
@@ -99,12 +107,16 @@ into the callback map instead of a copy; a one-shot timer removing itself
 from inside its own callback then use-after-freed its own captured `this`.
 If you're ever tempted to "optimize away" that copy, don't.)
 
-This single-thread-plus-reactor model is a deliberate fit for a Pi Zero:
-one ARM1176JZF-S core at ~1GHz has nothing to gain from a thread pool for
-this workload, and a single thread means no locking anywhere in
-`src/core`, `src/gpio`, `src/hw`, or `src/ipc` -- the only place this
-project should ever need a mutex is inside a future real `Engine`,
-which explicitly does *not* share the reactor thread (see below).
+This reactor model is a deliberate fit for a Pi Zero: one ARM1176JZF-S
+core at ~1GHz has nothing to gain from a thread *pool* for this workload.
+It's mostly single-threaded too, in the sense that matters: everything in
+`src/core`, `src/gpio`, `src/hw`, and `src/ipc` that talks to the *main*
+loop still needs no locking there, and a future real `Engine` still won't
+share the reactor thread either (see "Audio boundary" below). The one
+deliberate exception is the second thread "Software PWM" introduces --
+narrowly scoped (one more `EventLoop`, plus whatever needs to schedule
+work onto it from the main thread), not a general invitation to reach for
+`std::thread` elsewhere in this codebase.
 
 ### OS interaction, concretely
 
@@ -264,9 +276,13 @@ libgpiod headers to exist.
 
 ## Hardware layer
 
-- **`BellController`** (`src/hw`) is the simple, fully-implemented example
-  the "one working digital pin" requirement asked for: one `OutputPin`,
-  `ring()`/`silence()`/`ringFor(duration, loop)`. Read this one first.
+- **`BellController`** (`src/hw`) drives the bell via software PWM
+  (`Pwm`, see "Software PWM" below) rather than a plain digital on/off --
+  `ring()`/`silence()`/`ringFor(duration, loop)` are the same simple API
+  as before (this used to just wrap one `OutputPin`), they now move the
+  PWM's duty time between a configured "ring" value and zero instead of
+  writing the pin directly. Read this one first, then Pwm's own header
+  for why a relay/buzzer wants PWM instead of a flat digital drive.
 - **`Tcm1171Controller`** is the event-driven example: it owns two output
   pins (ring-mode enable, line polarity) and one input pin (hook detect),
   registers the input's edge fd with the `EventLoop` in its constructor,
@@ -275,11 +291,76 @@ libgpiod headers to exist.
 - **`StatusLed`** drives the Codec Zero HAT's own onboard green status LED
   (GPIO23 -- see "Pin assignments" below for why that specific line).
   `blinkNTimes()` is its one interesting method: schedules `n` on/off
-  cycles on the `EventLoop` and returns immediately (a self-rescheduling
-  chain of one-shot timers, not a blocking sleep loop), so it's safe to
-  call right before `loop.run()` without delaying startup -- `daemon_main`
-  does exactly that, 3 blinks, as a "the daemon is up" visual check with
-  no console/network access needed.
+  cycles on an `EventLoop` and returns immediately (a self-rescheduling
+  chain of one-shot timers, not a blocking sleep loop) -- `daemon_main`
+  calls it right as the daemon starts up, 3 blinks, as a "the daemon is
+  up" visual check with no console/network access needed. Runs on the
+  same background loop `Pwm` does now (see "Software PWM"), not the main
+  one, so its destructor has the same blocking-wait-for-cancellation
+  shape `Pwm`'s does, for the same reason -- see its header comment.
+
+## Software PWM
+
+`icom::hw::Pwm` (`src/hw/include/icom/hw/pwm.hpp`) cycles one GPIO output
+High for a configurable `dutyTime` out of every configurable `period`
+(10ms by default, both settable per-use -- `BellController`'s constructor
+takes them from `config/icom2000.conf`'s `[gpio.bell]` section,
+`pwm_period_ms`/`pwm_duty_ms`), indefinitely, until destroyed. It's what
+`BellController` now drives the bell through instead of a flat digital
+on/off -- a relay/buzzer isn't a clean digital load, and driving it at
+less than 100% duty controls how hard it strikes/how loud it buzzes (and
+draws less current continuously driving some relay coils would rather not
+have to).
+
+**Why this needs its own thread.** A 10ms PWM period means toggling the
+pin roughly every 5ms at 50% duty -- reliably, on schedule, regardless of
+whatever else the daemon is doing. Sharing the main `EventLoop` would mean
+that timing degrades every time an IPC command, a GPIO edge, or any other
+main-loop callback takes a few milliseconds, which is exactly the kind of
+jitter "Audio boundary" below already rules out sharing the reactor thread
+for. So `Pwm` runs on a second `EventLoop`, on its own thread
+(`icom::core::LoopThread`, `src/core/include/icom/core/loop_thread.hpp`)
+-- `daemon_main.cpp` constructs exactly one `LoopThread` and both `Pwm`
+(the bell) and `StatusLed`'s `blinkNTimes()` (the status LED) share its
+loop, rather than each spinning up a thread of its own.
+
+**Getting work onto that thread safely.** Every `EventLoop` method except
+one (`addFd`, `addTimer`, ...) is only safe to call from whichever thread
+is already running that loop's `run()` -- calling any of them from another
+thread races the loop's own internal bookkeeping. The one exception is
+`EventLoop::post(fn)`: thread-safe by design (a mutex-guarded queue plus
+the loop's existing wakeup fd), it hands `fn` to the loop's own thread to
+actually run. `Pwm`'s constructor uses `post()` internally to schedule its
+first cycle, so constructing one from the main thread (as `daemon_main.cpp`
+does) is safe without the caller having to think about it.
+`StatusLed::blinkNTimes()` does NOT do this internally -- it's meant to be
+usable against the main loop too, where doing so would be pointless
+overhead -- so a caller pointing it at a `LoopThread`'s loop has to
+`post()` the call itself, which is exactly what `daemon_main.cpp` does for
+the startup blink.
+
+**Destruction is the subtle part.** A cycle in flight captures `this` in
+its next scheduled timer callback; if the object were destroyed while that
+callback was still pending, the callback would eventually fire into freed
+memory. Both `Pwm` and `StatusLed` close this with the same pattern: their
+destructors `post()` a cancellation onto the loop and **block** until it
+has actually run there (a mutex + condition variable, not just firing the
+post and returning) -- only once that's confirmed is it safe to let the
+object's memory go. That blocking wait has one real requirement of its
+own: the loop has to still be *actively running* (something still calling
+its `run()`) for the entire time such an object exists, or the wait never
+returns. A `LoopThread`'s own loop satisfies this by construction, for as
+long as the `LoopThread` itself exists; the daemon's main loop does NOT
+once its own `run()` has returned during shutdown -- which is exactly why
+`Pwm` and backgroundLoop-targeted `blinkNTimes()` calls are for a
+`LoopThread`'s loop specifically, never the main one. `daemon_main.cpp`'s
+declaration order encodes the corresponding requirement on ITS side:
+`LoopThread` is declared before anything that uses its loop, so it's the
+last thing destroyed at shutdown (C++ destroys locals in reverse
+declaration order) -- getting this backwards would mean `Pwm`/`StatusLed`
+posting a cancellation to a `LoopThread` whose background thread has
+already been asked to stop (or worse, whose `EventLoop` has already been
+destroyed).
 
 ### Pin assignments (placeholder)
 
@@ -504,23 +585,32 @@ third-party framework (Catch2/doctest/GTest) via `FetchContent`, so
 is a ~20-line `CHECK()` macro. Swapping in a real framework later is a
 one-file change once the suite outgrows that.
 
-Four `ctest` cases: `icom_tests` covers `MockBackend` output/input
-behavior, and that an injected mock edge reaches an `EventLoop` callback
-end-to-end -- i.e. the same path `Tcm1171Controller` depends on in
-production. `icom_logger_tests` covers the logging registry and
-`configureLevels()` parsing (see "Logging" above). `icom_config_tests`
-covers `File` parsing (including the missing-vs-malformed-file
-distinction) and `StationRegistry`'s defaults/overrides (see
-"Configuration" above). `architecture_invariants` just runs
+Six `ctest` cases: `icom_tests` covers `MockBackend` output/input
+behavior, that an injected mock edge reaches an `EventLoop` callback
+end-to-end (the same path `Tcm1171Controller` depends on in production),
+`EventLoop::post()`, and `LoopThread` (confirming a posted callback
+genuinely runs on its background thread, not just eventually). Threaded
+tests there use a real background thread rather than faking one, since
+`post()`'s whole point is being safe to call across real threads.
+`icom_logger_tests` covers the logging registry and `configureLevels()`
+parsing (see "Logging" above). `icom_config_tests` covers `File` parsing
+(including the missing-vs-malformed-file distinction) and
+`StationRegistry`'s defaults/overrides (see "Configuration" above).
+`icom_hw_tests` covers `StatusLed` -- on/off state tracking, and
+`blinkNTimes()` against a real `LoopThread` (needed for correctness, not
+just realism: see "Software PWM" for why `~StatusLed()` requires an
+actively-running loop). `icom_pwm_tests` covers `Pwm` the same way:
+construction/`setDutyTime()` clamping, and that 0%/100%/partial duty
+actually produce the expected pin behavior over a real background loop.
+`architecture_invariants` just runs
 `scripts/check_architecture_invariants.sh` (see "Architecture
 invariants"). `GpiodBackend` isn't in this `ctest` suite (host-dev builds
 without it entirely, see "GPIO abstraction") but is compile/link-tested
 under the `pi0-release`/`pi0-debug` presets, per that section. What's
 still not covered: real hardware verification of `GpiodBackend`, and
-anything in `src/hw`/`src/ipc`/`src/app` beyond logging and config
-(straightforward to add following the same pattern; left out of this
-pass to keep it to "one representative example per layer" per the
-scaffold's brief).
+`src/ipc`/`src/app` beyond logging and config (straightforward to add
+following the same pattern; left out of this pass to keep it to "one
+representative example per layer" per the scaffold's brief).
 
 ## What's next
 
