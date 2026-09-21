@@ -7,19 +7,23 @@
 // CHECK().
 #include <iostream>
 
-namespace icom::testing {
+namespace icom::testing
+{
 
-inline int& failureCount() {
-    static int n = 0;
-    return n;
-}
-
-inline void check(bool condition, const char* expr, const char* file, int line) {
-    if (!condition) {
-        std::cerr << file << ":" << line << ": CHECK failed: " << expr << "\n";
-        ++failureCount();
+    inline int& failureCount()
+    {
+        static int n = 0;
+        return n;
     }
-}
+
+    inline void check(bool condition, const char* expr, const char* file, int line)
+    {
+        if (!condition)
+        {
+            std::cerr << file << ":" << line << ": CHECK failed: " << expr << "\n";
+            ++failureCount();
+        }
+    }
 
 } // namespace icom::testing
 

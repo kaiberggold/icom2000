@@ -9,120 +9,134 @@
 
 using namespace icom::config;
 
-namespace {
+namespace
+{
 
-void testParseReadsSectionsAndKeys() {
-    const auto result = File::parse(
-                            "[daemon]\n"
-                            "socket_path = /run/icom2000.sock\n"
-                            "# a comment, ignored\n"
-                            "\n"
-                            "[gpio.bell]\n"
-                            "line = 17\n");
+    void testParseReadsSectionsAndKeys()
+    {
+        const auto result = File::parse(
+                                "[daemon]\n"
+                                "socket_path = /run/icom2000.sock\n"
+                                "# a comment, ignored\n"
+                                "\n"
+                                "[gpio.bell]\n"
+                                "line = 17\n");
 
-    CHECK(result.ok);
-    CHECK(result.config.get("daemon", "socket_path", "") == "/run/icom2000.sock");
-    CHECK(result.config.getUint("gpio.bell", "line", 0) == 17);
-}
+        CHECK(result.ok);
+        CHECK(result.config.get("daemon", "socket_path", "") == "/run/icom2000.sock");
+        CHECK(result.config.getUint("gpio.bell", "line", 0) == 17);
+    }
 
-void testParseTrimsWhitespaceAroundKeyAndValue() {
-    const auto result = File::parse("[a]\n   key   =   value with spaces   \n");
-    CHECK(result.ok);
-    CHECK(result.config.get("a", "key", "") == "value with spaces");
-}
+    void testParseTrimsWhitespaceAroundKeyAndValue()
+    {
+        const auto result = File::parse("[a]\n   key   =   value with spaces   \n");
+        CHECK(result.ok);
+        CHECK(result.config.get("a", "key", "") == "value with spaces");
+    }
 
-void testParseToleratesCrlfLineEndings() {
-    const auto result = File::parse("[a]\r\nkey = value\r\n");
-    CHECK(result.ok);
-    CHECK(result.config.get("a", "key", "") == "value");
-}
+    void testParseToleratesCrlfLineEndings()
+    {
+        const auto result = File::parse("[a]\r\nkey = value\r\n");
+        CHECK(result.ok);
+        CHECK(result.config.get("a", "key", "") == "value");
+    }
 
-void testGetReturnsDefaultWhenAbsent() {
-    const auto result = File::parse("[a]\nkey = value\n");
-    CHECK(result.ok);
-    CHECK(result.config.get("a", "missing_key", "fallback") == "fallback");
-    CHECK(result.config.get("missing_section", "key", "fallback") == "fallback");
-}
+    void testGetReturnsDefaultWhenAbsent()
+    {
+        const auto result = File::parse("[a]\nkey = value\n");
+        CHECK(result.ok);
+        CHECK(result.config.get("a", "missing_key", "fallback") == "fallback");
+        CHECK(result.config.get("missing_section", "key", "fallback") == "fallback");
+    }
 
-void testGetListSplitsAndTrimsCommas() {
-    const auto result = File::parse("[stations]\nnames = door,  inside ,  \n");
-    CHECK(result.ok);
-    const std::vector<std::string> names = result.config.getList("stations", "names");
-    CHECK(names.size() == 2 && names[0] == "door" && names[1] == "inside");
-}
+    void testGetListSplitsAndTrimsCommas()
+    {
+        const auto result = File::parse("[stations]\nnames = door,  inside ,  \n");
+        CHECK(result.ok);
+        const std::vector<std::string> names = result.config.getList("stations", "names");
+        CHECK(names.size() == 2 && names[0] == "door" && names[1] == "inside");
+    }
 
-void testGetListEmptyWhenKeyAbsent() {
-    const auto result = File::parse("[a]\nkey = value\n");
-    CHECK(result.ok);
-    CHECK(result.config.getList("a", "no_such_key").empty());
-}
+    void testGetListEmptyWhenKeyAbsent()
+    {
+        const auto result = File::parse("[a]\nkey = value\n");
+        CHECK(result.ok);
+        CHECK(result.config.getList("a", "no_such_key").empty());
+    }
 
-void testParseRejectsKeyOutsideAnySection() {
-    const auto result = File::parse("key = value\n");
-    CHECK(!result.ok);
-    CHECK(!result.error.empty());
-}
+    void testParseRejectsKeyOutsideAnySection()
+    {
+        const auto result = File::parse("key = value\n");
+        CHECK(!result.ok);
+        CHECK(!result.error.empty());
+    }
 
-void testParseRejectsMalformedSectionHeader() {
-    const auto result = File::parse("[unterminated\n");
-    CHECK(!result.ok);
-}
+    void testParseRejectsMalformedSectionHeader()
+    {
+        const auto result = File::parse("[unterminated\n");
+        CHECK(!result.ok);
+    }
 
-void testParseRejectsLineWithoutEqualsOrSection() {
-    const auto result = File::parse("[a]\njust some words\n");
-    CHECK(!result.ok);
-}
+    void testParseRejectsLineWithoutEqualsOrSection()
+    {
+        const auto result = File::parse("[a]\njust some words\n");
+        CHECK(!result.ok);
+    }
 
-void testLoadMissingFileIsNotAnError() {
-    const auto result = File::load("/nonexistent/path/that/should/not/exist/icom2000.conf");
-    CHECK(result.ok);
-    CHECK(!result.fileFound);
-    // Falls back cleanly to defaults through the normal get() API.
-    CHECK(result.config.get("daemon", "socket_path", "default") == "default");
-}
+    void testLoadMissingFileIsNotAnError()
+    {
+        const auto result = File::load("/nonexistent/path/that/should/not/exist/icom2000.conf");
+        CHECK(result.ok);
+        CHECK(!result.fileFound);
+        // Falls back cleanly to defaults through the normal get() API.
+        CHECK(result.config.get("daemon", "socket_path", "default") == "default");
+    }
 
-void testStationRegistryFallsBackToDoorAndInsideWhenUnconfigured() {
-    const auto result = File::parse("[daemon]\nsocket_path = /run/x.sock\n");
-    CHECK(result.ok);
+    void testStationRegistryFallsBackToDoorAndInsideWhenUnconfigured()
+    {
+        const auto result = File::parse("[daemon]\nsocket_path = /run/x.sock\n");
+        CHECK(result.ok);
 
-    const StationRegistry stations(result.config);
-    CHECK(stations.all().size() == 2);
+        const StationRegistry stations(result.config);
+        CHECK(stations.all().size() == 2);
 
-    const Station* door = stations.find("door");
-    CHECK(door != nullptr);
-    CHECK(door != nullptr && door->captureDevice == "icom_door_capture");
-    CHECK(door != nullptr && door->playbackDevice == "icom_door_playback");
+        const Station* door = stations.find("door");
+        CHECK(door != nullptr);
+        CHECK(door != nullptr && door->captureDevice == "icom_door_capture");
+        CHECK(door != nullptr && door->playbackDevice == "icom_door_playback");
 
-    const Station* inside = stations.find("inside");
-    CHECK(inside != nullptr);
-    CHECK(inside != nullptr && inside->captureDevice == "icom_inside_capture");
+        const Station* inside = stations.find("inside");
+        CHECK(inside != nullptr);
+        CHECK(inside != nullptr && inside->captureDevice == "icom_inside_capture");
 
-    CHECK(stations.find("no_such_station") == nullptr);
-}
+        CHECK(stations.find("no_such_station") == nullptr);
+    }
 
-void testStationRegistryHonorsExplicitConfig() {
-    const auto result = File::parse(
-                            "[stations]\n"
-                            "names = door\n"
-                            "\n"
-                            "[station.door]\n"
-                            "capture_device = custom_capture\n"
-                            "playback_device = custom_playback\n");
-    CHECK(result.ok);
+    void testStationRegistryHonorsExplicitConfig()
+    {
+        const auto result = File::parse(
+                                "[stations]\n"
+                                "names = door\n"
+                                "\n"
+                                "[station.door]\n"
+                                "capture_device = custom_capture\n"
+                                "playback_device = custom_playback\n");
+        CHECK(result.ok);
 
-    const StationRegistry stations(result.config);
-    CHECK(stations.all().size() == 1);
+        const StationRegistry stations(result.config);
+        CHECK(stations.all().size() == 1);
 
-    const Station* door = stations.find("door");
-    CHECK(door != nullptr);
-    CHECK(door != nullptr && door->captureDevice == "custom_capture");
-    CHECK(door != nullptr && door->playbackDevice == "custom_playback");
-    CHECK(stations.find("inside") == nullptr);
-}
+        const Station* door = stations.find("door");
+        CHECK(door != nullptr);
+        CHECK(door != nullptr && door->captureDevice == "custom_capture");
+        CHECK(door != nullptr && door->playbackDevice == "custom_playback");
+        CHECK(stations.find("inside") == nullptr);
+    }
 
 } // namespace
 
-int main() {
+int main()
+{
     testParseReadsSectionsAndKeys();
     testParseTrimsWhitespaceAroundKeyAndValue();
     testParseToleratesCrlfLineEndings();
@@ -137,7 +151,8 @@ int main() {
     testStationRegistryHonorsExplicitConfig();
 
     const int failures = icom::testing::failureCount();
-    if (failures > 0) {
+    if (failures > 0)
+    {
         std::cerr << failures << " check(s) failed\n";
         return 1;
     }

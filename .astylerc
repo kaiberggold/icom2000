@@ -11,7 +11,7 @@
 # reformats something in a way that looks wrong, say so rather than
 # fighting it file-by-file with disable comments.
 
-style=attach
+style=allman
 indent=spaces=4
 
 # case labels indented one level inside their switch -- matches the
@@ -21,7 +21,7 @@ indent-switches
 # Namespace bodies and class access modifiers (public:/private:) are NOT
 # further indented anywhere in this codebase -- these are astyle's
 # defaults, listed for clarity rather than left implicit.
-# indent-namespaces  (default: off)
+indent-namespaces
 # indent-modifiers   (default: off)
 
 # Keep short one-line getters/bodies as written (e.g.

@@ -15,102 +15,117 @@
 using namespace icom;
 using namespace std::chrono_literals;
 
-namespace {
+namespace
+{
 
-void testPwmStartsAtZeroDutyWithTheConfiguredPeriod() {
-    gpio::MockBackend backend;
-    core::LoopThread background;
-    hw::Pwm pwm(backend.requestOutput(gpio::PinConfig{"mockchip0", 1, "test-pwm"}, gpio::Level::LOW),
-                background.loop(), 20ms);
+    void testPwmStartsAtZeroDutyWithTheConfiguredPeriod()
+    {
+        gpio::MockBackend backend;
+        core::LoopThread background;
+        hw::Pwm pwm(backend.requestOutput(gpio::PinConfig{"mockchip0", 1, "test-pwm"}, gpio::Level::LOW),
+                    background.loop(), 20ms);
 
-    CHECK(pwm.period() == 20ms);
-    CHECK(pwm.dutyTime() == 0ms);
-}
-
-void testSetDutyTimeClampsToZeroAndPeriod() {
-    gpio::MockBackend backend;
-    core::LoopThread background;
-    hw::Pwm pwm(backend.requestOutput(gpio::PinConfig{"mockchip0", 1, "test-pwm"}, gpio::Level::LOW),
-                background.loop(), 20ms);
-
-    pwm.setDutyTime(100ms); // > period
-    CHECK(pwm.dutyTime() == 20ms);
-
-    pwm.setDutyTime(-5ms); // < 0
-    CHECK(pwm.dutyTime() == 0ms);
-}
-
-void testZeroDutyKeepsThePinContinuouslyLow() {
-    gpio::MockBackend backend;
-    auto pin = backend.requestOutput(gpio::PinConfig{"mockchip0", 1, "test-pwm"}, gpio::Level::HIGH);
-    const gpio::OutputPin* raw = pin.get();
-
-    core::LoopThread background;
-    hw::Pwm pwm(std::move(pin), background.loop(), 5ms); // duty stays 0 (the default)
-
-    bool sawHigh = false;
-    for (int i = 0; i < 10; ++i) {
-        std::this_thread::sleep_for(5ms);
-        if (raw->drivenLevel() == gpio::Level::HIGH) {
-            sawHigh = true;
-        }
+        CHECK(pwm.period() == 20ms);
+        CHECK(pwm.dutyTime() == 0ms);
     }
 
-    CHECK(!sawHigh);
-    CHECK(raw->drivenLevel() == gpio::Level::LOW);
-}
+    void testSetDutyTimeClampsToZeroAndPeriod()
+    {
+        gpio::MockBackend backend;
+        core::LoopThread background;
+        hw::Pwm pwm(backend.requestOutput(gpio::PinConfig{"mockchip0", 1, "test-pwm"}, gpio::Level::LOW),
+                    background.loop(), 20ms);
 
-void testFullDutyKeepsThePinContinuouslyHigh() {
-    gpio::MockBackend backend;
-    auto pin = backend.requestOutput(gpio::PinConfig{"mockchip0", 1, "test-pwm"}, gpio::Level::LOW);
-    const gpio::OutputPin* raw = pin.get();
+        pwm.setDutyTime(100ms); // > period
+        CHECK(pwm.dutyTime() == 20ms);
 
-    core::LoopThread background;
-    hw::Pwm pwm(std::move(pin), background.loop(), 5ms);
-    pwm.setDutyTime(5ms); // == period: full on
-
-    // Give the first period a moment to land before sampling.
-    std::this_thread::sleep_for(10ms);
-
-    bool sawLow = false;
-    for (int i = 0; i < 10; ++i) {
-        std::this_thread::sleep_for(5ms);
-        if (raw->drivenLevel() == gpio::Level::LOW) {
-            sawLow = true;
-        }
+        pwm.setDutyTime(-5ms); // < 0
+        CHECK(pwm.dutyTime() == 0ms);
     }
 
-    CHECK(!sawLow);
-    CHECK(raw->drivenLevel() == gpio::Level::HIGH);
-}
+    void testZeroDutyKeepsThePinContinuouslyLow()
+    {
+        gpio::MockBackend backend;
+        auto pin = backend.requestOutput(gpio::PinConfig{"mockchip0", 1, "test-pwm"}, gpio::Level::HIGH);
+        const gpio::OutputPin* raw = pin.get();
 
-void testPartialDutyTogglesThePin() {
-    gpio::MockBackend backend;
-    auto pin = backend.requestOutput(gpio::PinConfig{"mockchip0", 1, "test-pwm"}, gpio::Level::LOW);
-    const gpio::OutputPin* raw = pin.get();
+        core::LoopThread background;
+        hw::Pwm pwm(std::move(pin), background.loop(), 5ms); // duty stays 0 (the default)
 
-    core::LoopThread background;
-    hw::Pwm pwm(std::move(pin), background.loop(), 10ms);
-    pwm.setDutyTime(5ms); // 50%
-
-    bool sawHigh = false;
-    bool sawLow = false;
-    for (int i = 0; i < 20; ++i) {
-        std::this_thread::sleep_for(5ms);
-        if (raw->drivenLevel() == gpio::Level::HIGH) {
-            sawHigh = true;
-        } else {
-            sawLow = true;
+        bool sawHigh = false;
+        for (int i = 0; i < 10; ++i)
+        {
+            std::this_thread::sleep_for(5ms);
+            if (raw->drivenLevel() == gpio::Level::HIGH)
+            {
+                sawHigh = true;
+            }
         }
+
+        CHECK(!sawHigh);
+        CHECK(raw->drivenLevel() == gpio::Level::LOW);
     }
 
-    CHECK(sawHigh);
-    CHECK(sawLow);
-}
+    void testFullDutyKeepsThePinContinuouslyHigh()
+    {
+        gpio::MockBackend backend;
+        auto pin = backend.requestOutput(gpio::PinConfig{"mockchip0", 1, "test-pwm"}, gpio::Level::LOW);
+        const gpio::OutputPin* raw = pin.get();
+
+        core::LoopThread background;
+        hw::Pwm pwm(std::move(pin), background.loop(), 5ms);
+        pwm.setDutyTime(5ms); // == period: full on
+
+        // Give the first period a moment to land before sampling.
+        std::this_thread::sleep_for(10ms);
+
+        bool sawLow = false;
+        for (int i = 0; i < 10; ++i)
+        {
+            std::this_thread::sleep_for(5ms);
+            if (raw->drivenLevel() == gpio::Level::LOW)
+            {
+                sawLow = true;
+            }
+        }
+
+        CHECK(!sawLow);
+        CHECK(raw->drivenLevel() == gpio::Level::HIGH);
+    }
+
+    void testPartialDutyTogglesThePin()
+    {
+        gpio::MockBackend backend;
+        auto pin = backend.requestOutput(gpio::PinConfig{"mockchip0", 1, "test-pwm"}, gpio::Level::LOW);
+        const gpio::OutputPin* raw = pin.get();
+
+        core::LoopThread background;
+        hw::Pwm pwm(std::move(pin), background.loop(), 10ms);
+        pwm.setDutyTime(5ms); // 50%
+
+        bool sawHigh = false;
+        bool sawLow = false;
+        for (int i = 0; i < 20; ++i)
+        {
+            std::this_thread::sleep_for(5ms);
+            if (raw->drivenLevel() == gpio::Level::HIGH)
+            {
+                sawHigh = true;
+            }
+            else
+            {
+                sawLow = true;
+            }
+        }
+
+        CHECK(sawHigh);
+        CHECK(sawLow);
+    }
 
 } // namespace
 
-int main() {
+int main()
+{
     testPwmStartsAtZeroDutyWithTheConfiguredPeriod();
     testSetDutyTimeClampsToZeroAndPeriod();
     testZeroDutyKeepsThePinContinuouslyLow();
@@ -118,7 +133,8 @@ int main() {
     testPartialDutyTogglesThePin();
 
     const int failures = icom::testing::failureCount();
-    if (failures > 0) {
+    if (failures > 0)
+    {
         std::cerr << failures << " check(s) failed\n";
         return 1;
     }

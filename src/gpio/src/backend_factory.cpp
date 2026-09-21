@@ -5,14 +5,16 @@
 #include "gpiod/gpiod_backend.hpp"
 #endif
 
-namespace icom::gpio {
+namespace icom::gpio
+{
 
-std::unique_ptr<Backend> makeDefaultBackend() {
+    std::unique_ptr<Backend> makeDefaultBackend()
+    {
 #if defined(ICOM_WITH_LIBGPIOD)
-    return std::make_unique<GpiodBackend>();
+        return std::make_unique<GpiodBackend>();
 #else
-    return std::make_unique<MockBackend>();
+        return std::make_unique<MockBackend>();
 #endif
-}
+    }
 
 } // namespace icom::gpio
