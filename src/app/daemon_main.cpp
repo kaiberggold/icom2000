@@ -93,10 +93,10 @@ Options parseArgs(int argc, char** argv) {
                     << "        (also settable via the ICOM_LOG environment variable;\n"
                     << "        --log-level takes precedence when both are given)\n"
                     << "  --log-console   also print log messages to stderr, at the level(s) above\n"
-                    << "                  (in addition to syslog, not instead of it) -- useful when\n"
-                    << "                  running interactively or under a debugger; not needed for a\n"
-                    << "                  systemd-managed run, since journalctl already has everything\n"
-                    << "                  syslog gets\n";
+                    << "                  (in addition to the journal, not instead of it) -- useful\n"
+                    << "                  when running interactively or under a debugger; not needed\n"
+                    << "                  for a systemd-managed run, since journalctl already has\n"
+                    << "                  everything this would show\n";
             std::exit(0);
         }
     }
@@ -109,7 +109,7 @@ icom::core::Logger& log = icom::core::getLogger("app");
 
 int main(int argc, char** argv) {
 
-    icom::core::initSyslog("icom2000");
+    icom::core::initJournal("icom2000");
     log.info("Daemon started");
 
     const Options opts = parseArgs(argc, argv);

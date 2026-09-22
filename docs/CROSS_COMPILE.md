@@ -233,9 +233,9 @@ source ~/.bashrc
 which armv6-rpi-linux-gnueabihf-gcc   # sanity check before building
 armv6-rpi-linux-gnueabihf-gcc --version
 
-# 6. Build icom2000 with it:
+# 6. Build icom2000 with it -- ICOM_PI_SYSROOT is required (see below):
 cd /path/to/icom2000
-cmake --preset pi0-release
+cmake --preset pi0-release -DICOM_PI_SYSROOT=/path/to/a/raspberry-pi-os-sysroot
 cmake --build --preset pi0-release
 ```
 
@@ -243,14 +243,26 @@ cmake --build --preset pi0-release
 safety feature, not a bug to work around), and legitimately shouldn't
 need to be root for anything it does.
 
-No `ICOM_PI_SYSROOT` needed for this alone -- libgpiod cross-builds from
-source automatically (see below), and everything else intercomd links
-against is either header-only or part of the toolchain's own bundled C/
-C++ runtime. You'd still want a sysroot (rsynced from a real Pi, feeding
-`ICOM_PI_SYSROOT`) for a library that genuinely has to match the target
-Raspberry Pi OS build exactly and isn't practical to cross-build yourself
--- ALSA (`libasound`), when the real `Engine` implementation arrives,
-is the likely future example.
+`ICOM_PI_SYSROOT` **is** needed for this option, unconditionally --
+`icom::core::Logger` links `libsystemd` (`sd_journal_send()`, see
+docs/ARCHITECTURE.md "Logging"), and unlike libgpiod there is no
+`ICOM_LIBGPIOD_BUILD_FROM_SOURCE`-style "cross-compile it from source
+instead" escape hatch for it: `libsystemd` is tightly coupled to the exact
+systemd build it ships with, so the only practical way to get a
+genuinely-matching ARMv6 copy is a real Raspberry Pi OS sysroot, the same
+way "Two ways to get libgpiod" describes for the non-build-from-source
+path (`ICOM_LIBGPIOD_BUILD_FROM_SOURCE=OFF`) below. Point
+`ICOM_PI_SYSROOT` at a Raspberry Pi OS filesystem (rsynced from a real Pi,
+or extracted from an image) that already has `libsystemd-dev` installed --
+the toolchain file already wires `PKG_CONFIG_SYSROOT_DIR`/
+`PKG_CONFIG_LIBDIR` from it (`cmake/toolchain-arm-linux-gnueabihf.cmake`),
+so the top-level `pkg_check_modules(SYSTEMD REQUIRED IMPORTED_TARGET
+libsystemd)` in `CMakeLists.txt` finds it the same way `PkgConfig::GPIOD`
+does in "Building libgpiod from source" below. You'd want the same sysroot
+anyway for a library that genuinely has to match the target Raspberry Pi
+OS build exactly and isn't practical to cross-build yourself -- ALSA
+(`libasound`), when the real `Engine` implementation arrives, is the
+likely future example.
 
 If getting a real ARMv6 toolchain turns out to be more yak-shaving than
 it's worth, fall back to Option A -- it needs no custom toolchain at all.

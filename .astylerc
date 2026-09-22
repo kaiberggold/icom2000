@@ -15,7 +15,7 @@ style=allman
 indent=spaces=4
 
 # case labels indented one level inside their switch -- matches the
-# existing src/core/src/logger.cpp::to_syslog_priority() style, etc.
+# existing src/core/src/logger.cpp::journalPriority() style, etc.
 indent-switches
 
 # Namespace bodies and class access modifiers (public:/private:) are NOT

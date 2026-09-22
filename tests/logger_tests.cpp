@@ -1,10 +1,11 @@
 // Covers the pure logic in icom::core::Logger/getLogger/configureLevels:
 // registry identity, level filtering, and configureLevels()'s parsing and
 // "validate everything before applying anything" contract. Does NOT check
-// that messages actually reach syslog -- that needs a real (or faked)
-// /dev/log listener, which was verified manually against this build (see
-// the commit message / docs/ARCHITECTURE.md "Logging"); it isn't something
-// worth automating a fake Unix-datagram-socket receiver for in this suite.
+// that messages actually reach the journal -- that needs a real (or faked)
+// sd_journal_send() receiver, which was verified manually against this
+// build (see the commit message / docs/ARCHITECTURE.md "Logging"); it
+// isn't something worth automating a fake journal socket receiver for in
+// this suite.
 //
 // The logger registry is a process-wide singleton, so tests share it.
 // Each test below either uses a component name nothing else in this binary

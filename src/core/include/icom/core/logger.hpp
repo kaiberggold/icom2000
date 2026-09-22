@@ -17,13 +17,17 @@ enum class LogLevel { DEBUG, INFO, WARN, ERROR };
 // exists is visible in one place (the registry) for whoever is tuning
 // levels.
 //
-// Writes go to syslog(3) -- under systemd that lands in the journal
-// (`journalctl`), same as any other well-behaved daemon; see
-// docs/ARCHITECTURE.md "Logging" for why syslog rather than the kernel
-// ring buffer (/dev/kmsg) despite the "kernel log" framing this started
-// from. glibc's syslog() never throws or blocks the caller on failure
-// (e.g. no /dev/log present) -- worst case a call here is a silent no-op,
-// which is why nothing in this header reports an error for a failed log().
+// Writes go straight to the systemd journal via sd_journal_send() (see
+// docs/ARCHITECTURE.md "Logging") -- not syslog(3). This is a deliberate,
+// accepted portability tradeoff: it makes every log() call systemd-only,
+// which is fine since the sole deployment target (Raspberry Pi OS) is
+// itself systemd-based. The payoff is a custom, filterable journal field
+// per entry -- ICOM_COMPONENT=<component> -- so `journalctl
+// ICOM_COMPONENT=hw.bell` finds exactly one component's lines, something
+// plain syslog(3) text can't offer. sd_journal_send() never throws or
+// blocks the caller on failure (e.g. no journal socket present) -- worst
+// case a call here is a silent no-op, which is why nothing in this header
+// reports an error for a failed log().
 class Logger {
 public:
     Logger(std::string component, LogLevel level);
@@ -77,26 +81,25 @@ bool configureLevels(std::string_view spec);
 // false under the same conditions configureLevels() does.
 bool configureLevelsFromEnv(const char* envVar = "ICOM_LOG");
 
-// Mirrors every logged message to stderr, in addition to syslog, subject
-// to the same per-component level filtering -- off by default. Meant for
-// interactive use (e.g. a VS Code cppdbg session with
+// Mirrors every logged message to stderr, in addition to the journal,
+// subject to the same per-component level filtering -- off by default.
+// Meant for interactive use (e.g. a VS Code cppdbg session with
 // "externalConsole": false, which captures the debuggee's stderr into the
-// Debug Console) where waiting on `journalctl`/a syslog listener in a
-// second window is more friction than it's worth. Safe to leave on for a
-// real deployment too (stderr just goes wherever systemd sends it, which
-// for a unit without its own `StandardError=` is the journal -- so this
-// would only ever double up output that's already journal-bound), but
-// there's no reason to bother when it's not being watched.
+// Debug Console) where waiting on `journalctl` in a second window is more
+// friction than it's worth. Safe to leave on for a real deployment too
+// (stderr just goes wherever systemd sends it, which for a unit without
+// its own `StandardError=` is the journal -- so this would only ever
+// double up output that's already journal-bound), but there's no reason
+// to bother when it's not being watched.
 void setConsoleOutput(bool enable);
 
-// Opens the syslog connection every Logger writes through (openlog(3)).
-// Call once, early in main(), before spawning any other thread --
-// openlog()'s `ident` is retained by pointer, not copied, by glibc, so
-// this keeps its own copy alive for the process lifetime rather than
-// trusting the caller's string to outlive every future log() call.
-// Logging before this runs still works (glibc opens the connection
-// lazily with default settings on first syslog() call); it just won't
-// carry `ident`/`facility` yet.
-void initSyslog(std::string_view ident, int facility = LOG_DAEMON);
+// Sets the SYSLOG_IDENTIFIER/SYSLOG_FACILITY journal fields every log()
+// call attaches from then on (`journalctl -t <ident>` matches on the
+// former). Call once, early in main(), before spawning any other thread.
+// Unlike openlog(3)/syslog(3), sd_journal_send() has no persistent
+// connection to open -- this just records `ident`/`facility` in a static
+// for log() to read on every call, so logging before this runs still
+// works; it just carries the default ident ("icom2000") until it does.
+void initJournal(std::string_view ident, int facility = LOG_DAEMON);
 
 } // namespace icom::core

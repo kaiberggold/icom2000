@@ -11,4 +11,4 @@ target_include_directories(icom_core PUBLIC
 )
 
 target_compile_features(icom_core PUBLIC cxx_std_20)
-target_link_libraries(icom_core PUBLIC Threads::Threads PRIVATE icom::warnings)
+target_link_libraries(icom_core PUBLIC Threads::Threads PRIVATE icom::warnings PkgConfig::SYSTEMD)

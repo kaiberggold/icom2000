@@ -142,21 +142,35 @@ work onto it from the main thread), not a general invitation to reach for
 ## Logging
 
 `icom::core::Logger` (`src/core/include/icom/core/logger.hpp`) is a named,
-independently-leveled logger -- roughly one per module -- writing through
-`syslog(3)`. Under systemd that lands in the journal exactly like any other
-well-behaved daemon's log output (`journalctl -u intercomd`, or filter by
-identifier with `journalctl -t icom2000`); on a plain Raspberry Pi OS
-install without a separate rsyslog it's journald providing `/dev/log`
-either way, so there's nothing extra to set up.
+independently-leveled logger -- roughly one per module -- writing straight
+to the systemd journal via `sd_journal_send()` (`libsystemd`), not
+`syslog(3)`. `journalctl -u intercomd` shows everything; `journalctl -t
+icom2000` filters by the process-wide identifier `initJournal()` sets in
+`main()`; `journalctl ICOM_COMPONENT=hw.bell` filters to just one
+component's lines, via a custom journal field every `log()` call attaches
+(see "Per-component levels" below for the component names) -- this is the
+"tag" that `syslog(3)`'s plain-text messages can't offer, and the reason
+this module uses the journal API directly rather than going through
+syslog.
+
+This is a deliberate, accepted portability tradeoff: `sd_journal_send()` is
+systemd-specific, so this project is now Linux-and-systemd-only end to end.
+That costs nothing here -- the sole deployment target, Raspberry Pi OS, is
+itself systemd-based -- and it's a strictly stronger guarantee than the
+`syslog(3)` version this replaced, which merely assumed *something* was
+listening on `/dev/log` (journald, in practice, on every install this
+project targets anyway).
 
 (This module started from a request to log "to the kernel log" --
-`/dev/kmsg`/`dmesg`. That's a real, different thing from syslog: writing
-`/dev/kmsg` requires `CAP_SYSLOG` or root and shows up in `dmesg` whether
-or not a syslog daemon is even running, whereas `syslog(3)` needs no
-special privilege but requires something listening on `/dev/log`. This
-project uses `syslog(3)` -- it's the conventional destination for a
-userspace daemon's own logs, works with the unprivileged systemd unit this
-project already ships, and every message still ends up in the journal.)
+`/dev/kmsg`/`dmesg`. That's a real, different thing: writing `/dev/kmsg`
+requires `CAP_SYSLOG` or root and shows up in `dmesg` whether or not a log
+daemon is even running, whereas both `syslog(3)` and `sd_journal_send()`
+need no special privilege but require something listening on the other
+end. This project logs to the journal -- it's the conventional destination
+for a userspace daemon's own logs under systemd, works with the
+unprivileged systemd unit this project already ships, and unlocks
+per-entry structured fields `/dev/kmsg` and plain `syslog(3)` text both
+lack.)
 
 ### Per-component levels
 
@@ -197,12 +211,12 @@ levels components happened to default to.
 ### Seeing log output while debugging
 
 `--log-console` (`icom::core::setConsoleOutput(true)`) mirrors every
-logged message to stderr, in addition to syslog, at whatever level(s)
+logged message to stderr, in addition to the journal, at whatever level(s)
 `--log-level`/`ICOM_LOG` already set -- off by default, since a
 systemd-managed run has nothing to gain from it (stderr just lands in the
 journal a second time). It exists for interactive/debugger use, where
-waiting on a second `journalctl -f`/fake-`/dev/log` window is friction a
-plain `std::cerr` line doesn't have: the "Debug intercomd" and "Debug
+waiting on a second `journalctl -f` window is friction a plain `std::cerr`
+line doesn't have: the "Debug intercomd" and "Debug
 intercomd on Pi Zero" `.vscode/launch.json` configs both pass it, and with
 `"externalConsole": false` (already set), VS Code's cppdbg captures that
 stderr straight into the Debug Console. The remote-gdbserver config is the
@@ -229,13 +243,21 @@ matter which TU that first use comes from.
 
 `tests/logger_tests.cpp` covers the registry (identity, per-component
 levels) and `configureLevels()`'s parsing, including that a rejected spec
-changes nothing. It does not check that a message actually reaches
-`syslog` -- that was instead verified manually against this exact build,
-by standing up a throwaway `AF_UNIX SOCK_DGRAM` listener at `/dev/log` and
-running `intercomd` against it (there's no standing fake-syslog fixture in
+changes nothing. It does not check that a message actually reaches the
+journal -- that was instead verified manually against this exact build, by
+standing up a throwaway `AF_UNIX SOCK_DGRAM` listener at
+`/run/systemd/journal/socket` (the native journal protocol's endpoint) and
+running `intercomd` against it (there's no standing fake-journal fixture in
 the repo; it isn't worth automating a Unix-socket receiver for one
-integration check when the actual `syslog(3)` call is standard,
-decades-stable POSIX API).
+integration check when `sd_journal_send()` is a stable, documented
+`libsystemd` API). That capture confirmed every field lands as designed:
+`MESSAGE=[component] text`, `PRIORITY`, `SYSLOG_IDENTIFIER=icom2000`,
+`SYSLOG_FACILITY`, and the new `ICOM_COMPONENT=<component>` tag --
+`sd_journal_send()` is itself a macro wrapping
+`sd_journal_send_with_location()`, so `CODE_FILE`/`CODE_LINE`/`CODE_FUNC`
+also show up for free (pointing at `Logger::log()`'s own call site in
+`logger.cpp`, not each caller -- accurate, if not especially useful, so
+nothing here relies on it).
 
 ## GPIO abstraction
 
