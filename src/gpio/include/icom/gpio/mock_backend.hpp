@@ -11,14 +11,14 @@ namespace icom::gpio {
 //
 // Exposed as a concrete type (not just via makeDefaultBackend()) so tests
 // can reach MockInputPin::inject_edge() on the pins they requested.
-class MockBackend final : public Backend {
+class MockBackend final : public IBackend {
 public:
-    std::unique_ptr<OutputPin> requestOutput(const PinConfig& config, Level initial) override;
-    std::unique_ptr<InputPin> requestInput(const PinConfig& config, Edge edge) override;
+    std::unique_ptr<IOutputPin> requestOutput(const PinConfig& config, Level initial) override;
+    std::unique_ptr<IInputPin> requestInput(const PinConfig& config, Edge edge) override;
 };
 
 // Injects a simulated edge into a pin previously obtained from MockBackend.
 // No-op (and returns false) if `pin` was not produced by MockBackend.
-bool injectMockEdge(InputPin& pin, Level level);
+bool injectMockEdge(IInputPin& pin, Level level);
 
 } // namespace icom::gpio

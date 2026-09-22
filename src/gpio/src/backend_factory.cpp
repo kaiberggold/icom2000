@@ -8,7 +8,7 @@
 namespace icom::gpio
 {
 
-    std::unique_ptr<Backend> makeDefaultBackend()
+    std::unique_ptr<IBackend> makeDefaultBackend()
     {
 #if defined(ICOM_WITH_LIBGPIOD)
         return std::make_unique<GpiodBackend>();

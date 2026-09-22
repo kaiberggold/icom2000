@@ -4,7 +4,7 @@
 // and LoopThread, the EventLoop-on-its-own-thread wrapper icom::hw::Pwm
 // and StatusLed's background blinking are built on. Together the GPIO
 // pieces stand in for what would otherwise need a physical GPIO chip --
-// this is the payoff of the OutputPin/InputPin interface split in
+// this is the payoff of the IOutputPin/IInputPin interface split in
 // icom/gpio/digital_pin.hpp.
 #include "check.hpp"
 

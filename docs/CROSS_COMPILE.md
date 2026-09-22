@@ -261,7 +261,7 @@ libsystemd)` in `CMakeLists.txt` finds it the same way `PkgConfig::GPIOD`
 does in "Building libgpiod from source" below. You'd want the same sysroot
 anyway for a library that genuinely has to match the target Raspberry Pi
 OS build exactly and isn't practical to cross-build yourself -- ALSA
-(`libasound`), when the real `Engine` implementation arrives, is the
+(`libasound`), when the real `IEngine` implementation arrives, is the
 likely future example.
 
 If getting a real ARMv6 toolchain turns out to be more yak-shaving than

@@ -24,14 +24,14 @@ using namespace icom;
 namespace
 {
 
-// Wraps a mock OutputPin and counts every write() call, so a test can
+// Wraps a mock IOutputPin and counts every write() call, so a test can
 // assert on the number of on/off transitions blinkNTimes() actually
-// performed -- MockBackend's own OutputPin only exposes the *current*
+// performed -- MockBackend's own IOutputPin only exposes the *current*
 // drivenLevel(), not a history of writes.
-    class CountingOutputPin : public gpio::OutputPin
+    class CountingOutputPin : public gpio::IOutputPin
     {
     public:
-        CountingOutputPin(std::unique_ptr<gpio::OutputPin> inner, int& writeCount)
+        CountingOutputPin(std::unique_ptr<gpio::IOutputPin> inner, int& writeCount)
             : inner_(std::move(inner)), writeCount_(writeCount) {}
 
         void write(gpio::Level level) override
@@ -43,7 +43,7 @@ namespace
         gpio::Level drivenLevel() const override { return inner_->drivenLevel(); }
 
     private:
-        std::unique_ptr<gpio::OutputPin> inner_;
+        std::unique_ptr<gpio::IOutputPin> inner_;
         int& writeCount_;
     };
 
@@ -60,7 +60,7 @@ namespace
     {
         gpio::MockBackend backend;
         auto pin = backend.requestOutput(gpio::PinConfig{"mockchip0", 23, "test-led"}, gpio::Level::LOW);
-        const gpio::OutputPin* raw = pin.get();
+        const gpio::IOutputPin* raw = pin.get();
 
         hw::StatusLed led(std::move(pin));
 
@@ -95,7 +95,7 @@ namespace
 
         int writeCount = 0;
         auto countingPin = std::make_unique<CountingOutputPin>(std::move(pin), writeCount);
-        const gpio::OutputPin* raw = countingPin.get();
+        const gpio::IOutputPin* raw = countingPin.get();
 
         // Declared before `led` (so destroyed after it): ~StatusLed() needs
         // this loop still actively running when it tears down, which only

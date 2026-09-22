@@ -47,7 +47,7 @@ namespace
     {
         gpio::MockBackend backend;
         auto pin = backend.requestOutput(gpio::PinConfig{"mockchip0", 1, "test-pwm"}, gpio::Level::HIGH);
-        const gpio::OutputPin* raw = pin.get();
+        const gpio::IOutputPin* raw = pin.get();
 
         core::LoopThread background;
         hw::Pwm pwm(std::move(pin), background.loop(), 5ms); // duty stays 0 (the default)
@@ -70,7 +70,7 @@ namespace
     {
         gpio::MockBackend backend;
         auto pin = backend.requestOutput(gpio::PinConfig{"mockchip0", 1, "test-pwm"}, gpio::Level::LOW);
-        const gpio::OutputPin* raw = pin.get();
+        const gpio::IOutputPin* raw = pin.get();
 
         core::LoopThread background;
         hw::Pwm pwm(std::move(pin), background.loop(), 5ms);
@@ -97,7 +97,7 @@ namespace
     {
         gpio::MockBackend backend;
         auto pin = backend.requestOutput(gpio::PinConfig{"mockchip0", 1, "test-pwm"}, gpio::Level::LOW);
-        const gpio::OutputPin* raw = pin.get();
+        const gpio::IOutputPin* raw = pin.get();
 
         core::LoopThread background;
         hw::Pwm pwm(std::move(pin), background.loop(), 10ms);

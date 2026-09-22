@@ -11,7 +11,7 @@ namespace {
 
 core::Logger& log = core::getLogger("audio");
 
-class NullEngine final : public Engine {
+class NullEngine final : public IEngine {
 public:
     explicit NullEngine(std::vector<config::Station> stations) : stations_(std::move(stations)) {}
 
@@ -38,7 +38,7 @@ private:
 
 } // namespace
 
-std::unique_ptr<Engine> makeNullEngine(const config::StationRegistry& stations) {
+std::unique_ptr<IEngine> makeNullEngine(const config::StationRegistry& stations) {
     return std::make_unique<NullEngine>(stations.all());
 }
 

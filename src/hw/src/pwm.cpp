@@ -13,7 +13,7 @@ namespace icom::hw
         core::Logger& log = core::getLogger("hw.pwm");
     } // namespace
 
-    Pwm::Pwm(std::unique_ptr<gpio::OutputPin> pin, core::EventLoop& loop, std::chrono::milliseconds period)
+    Pwm::Pwm(std::unique_ptr<gpio::IOutputPin> pin, core::EventLoop& loop, std::chrono::milliseconds period)
         : pin_(std::move(pin)), loop_(loop), period_(period), dutyTime_(std::chrono::milliseconds::zero())
     {
         log.debug("starting, period=" + std::to_string(period_.count()) + "ms");

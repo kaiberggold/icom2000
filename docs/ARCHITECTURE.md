@@ -28,14 +28,14 @@ src/core/   EventLoop (reactor) + LoopThread (an EventLoop on its own
             knowledge at all.
 src/config/ File (INI-style reader) + StationRegistry -- see
             "Configuration" below. No hardware knowledge either.
-src/gpio/   OutputPin/InputPin/Backend interfaces, plus two
+src/gpio/   IOutputPin/IInputPin/IBackend interfaces, plus two
             implementations: MockBackend (in-process, for host dev/tests)
             and GpiodBackend (libgpiod, for target hardware).
 src/hw/     Domain logic built only on the gpio interfaces: Pwm (software
             PWM, see "Software PWM" below) + BellController built on it,
             StatusLed, and Tcm1171Controller (the stateful, event-driven
             example).
-src/audio/  Engine interface + a no-op NullEngine. Real ALSA
+src/audio/  IEngine interface + a no-op NullEngine. Real ALSA
             code is a later pass -- see "Audio boundary" below.
 src/ipc/    The Unix-socket control protocol and its server.
 src/app/    daemon_main.cpp -- the composition root. Everything above is
@@ -111,7 +111,7 @@ This reactor model is a deliberate fit for a Pi Zero: one ARM1176JZF-S
 core at ~1GHz has nothing to gain from a thread *pool* for this workload.
 It's mostly single-threaded too, in the sense that matters: everything in
 `src/core`, `src/gpio`, `src/hw`, and `src/ipc` that talks to the *main*
-loop still needs no locking there, and a future real `Engine` still won't
+loop still needs no locking there, and a future real `IEngine` still won't
 share the reactor thread either (see "Audio boundary" below). The one
 deliberate exception is the second thread "Software PWM" introduces --
 narrowly scoped (one more `EventLoop`, plus whatever needs to schedule
@@ -261,7 +261,7 @@ nothing here relies on it).
 
 ## GPIO abstraction
 
-`icom::gpio::OutputPin` / `InputPin` / `Backend`
+`icom::gpio::IOutputPin` / `IInputPin` / `IBackend`
 (`src/gpio/include/icom/gpio/digital_pin.hpp`) are the only thing
 `src/hw` and `src/app` are allowed to depend on for GPIO access -- neither
 includes `<gpiod.hpp>` or knows libgpiod exists. Two backends implement
@@ -284,7 +284,7 @@ that interface:
   called `gpiod::line_request::get_value()`, which isn't `const` in the
   actual API, from a `const` member function -- `request_` is now
   `mutable`, since reading a pin's value is logically const from
-  `InputPin::read()`'s perspective regardless of that binding's own
+  `IInputPin::read()`'s perspective regardless of that binding's own
   constness. **Not yet verified on real hardware** -- the toolchain used
   to compile-test it cannot itself produce valid ARMv6 output (see
   docs/CROSS_COMPILE.md's "Read this first"), so this confirms the code
@@ -301,7 +301,7 @@ libgpiod headers to exist.
 - **`BellController`** (`src/hw`) drives the bell via software PWM
   (`Pwm`, see "Software PWM" below) rather than a plain digital on/off --
   `ring()`/`silence()`/`ringFor(duration, loop)` are the same simple API
-  as before (this used to just wrap one `OutputPin`), they now move the
+  as before (this used to just wrap one `IOutputPin`), they now move the
   PWM's duty time between a configured "ring" value and zero instead of
   writing the pin directly. Read this one first, then Pwm's own header
   for why a relay/buzzer wants PWM instead of a flat digital drive.
@@ -415,7 +415,7 @@ hardware:
 
 ## Audio boundary
 
-Out of scope for this pass by design. `icom::audio::Engine`
+Out of scope for this pass by design. `icom::audio::IEngine`
 (`src/audio/include/icom/audio/audio_engine.hpp`) defines the seam a real
 implementation plugs into; `NullEngine` satisfies it today so the
 daemon builds, runs, and reports `audio=down`... `audio=up`-but-silent
@@ -477,7 +477,7 @@ is the **one place** a station name is tied to a physical/logical audio
 channel: `config/icom2000.conf`'s `[stations]` (the name list) and
 `[station.<name>]` (that station's named capture/playback devices,
 defined in `config/asound.conf`) sections. Everything else -- today, just
-the `Engine` factory; later, whatever actually streams audio --
+the `IEngine` factory; later, whatever actually streams audio --
 refers to stations as `"door"`/`"inside"` and nothing else. No code
 anywhere works with "left"/"right" or a channel index; there wouldn't
 even be a natural place to put that, since a `Station` only exposes
@@ -642,7 +642,7 @@ Roughly in the order it'd need doing to become a real intercom:
    assignments"); fix polarity/line numbers.
 2. Pulse-dial decoding off the same hook-detect edges
    `Tcm1171Controller` already timestamps.
-3. A real `Engine` against the Codec Zero (ALSA duplex, its own
+3. A real `IEngine` against the Codec Zero (ALSA duplex, its own
    thread(s), a ring/tone generator for the TCM1171's ring cadence),
    opening the named devices `StationRegistry` already hands it.
 4. Verified per-channel routing in `config/asound.conf` (currently plain

@@ -12,8 +12,8 @@ namespace icom::hw {
 // rather than a plain on/off GPIO write -- ring()/silence() just move the
 // PWM's duty time between `ringDutyTime` (constructor parameter) and
 // zero, so callers see the same simple two-state API as a plain digital
-// pin (this used to BE just one OutputPin; see Tcm1171Controller for how
-// a stateful, event-driven component built directly on OutputPin/InputPin
+// pin (this used to BE just one IOutputPin; see Tcm1171Controller for how
+// a stateful, event-driven component built directly on IOutputPin/IInputPin
 // would look). PWM matters here because the bell is a relay/buzzer, not a
 // clean digital load: driving it at less than 100% duty controls how
 // hard it strikes/how loud it buzzes, and continuous full-power drive on
