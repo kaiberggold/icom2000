@@ -16,11 +16,9 @@ namespace icom::config {
 //
 // `captureDevice`/`playbackDevice` are named ALSA PCM devices, defined
 // in config/asound.conf (installed as /etc/asound.conf) -- never a raw
-// sound-card device string. Not consumed by anything yet (Engine is
-// still a stub, see docs/ARCHITECTURE.md "Audio boundary"), but every
-// station config already carries these names so a future real
-// implementation has a place to get a device name from other than
-// inventing one inline.
+// sound-card device string. Read by makeAlsaEngine() (src/audio), which
+// the daemon doesn't run yet -- see docs/ARCHITECTURE.md "Audio
+// boundary".
 struct Station {
     std::string name;
     std::string captureDevice;

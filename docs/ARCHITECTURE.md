@@ -35,8 +35,9 @@ src/hw/     Domain logic built only on the gpio interfaces: Pwm (software
             PWM, see "Software PWM" below) + BellController built on it,
             StatusLed, and Tcm1171Controller (the stateful, event-driven
             example).
-src/audio/  IEngine interface + a no-op NullEngine. Real ALSA
-            code is a later pass -- see "Audio boundary" below.
+src/audio/  IEngine interface, a no-op NullEngine (what the daemon
+            runs today), and a first ALSA engine not yet wired in -- see
+            "Audio boundary" below.
 src/ipc/    The Unix-socket control protocol and its server.
 src/app/    daemon_main.cpp -- the composition root. Everything above is
             constructed and wired together here; nothing else in the tree
@@ -188,7 +189,8 @@ where I want": add a `log` line if the file doesn't have one yet
 (matching the dotted `module.submodule` naming already in use -- see any
 existing `.cpp` under `src/` for the pattern), then log. Current
 components: `core.event_loop`, `gpio.mock`, `gpio.gpiod`, `hw.bell`,
-`hw.tcm1171`, `audio`, `ipc.control_server`, `app`.
+`hw.pwm`, `hw.status_led`, `hw.tcm1171`, `audio`, `audio.alsa`,
+`ipc.control_server`, `app`.
 
 Levels are set at startup, per component, via the `ICOM_LOG` environment
 variable or `intercomd --log-level`, both parsed by the same
@@ -415,12 +417,56 @@ hardware:
 
 ## Audio boundary
 
-Out of scope for this pass by design. `icom::audio::IEngine`
-(`src/audio/include/icom/audio/audio_engine.hpp`) defines the seam a real
-implementation plugs into; `NullEngine` satisfies it today so the
-daemon builds, runs, and reports `audio=down`... `audio=up`-but-silent
-honestly via `intercomctl status` without every other component needing
-to special-case "audio doesn't exist yet".
+`icom::audio::IEngine` (`src/audio/include/icom/audio/audio_engine.hpp`)
+defines the seam a real implementation plugs into; `NullEngine` is what
+the daemon runs today, so it builds, runs, and reports `audio=down`...
+`audio=up`-but-silent honestly via `intercomctl status` without every
+other component needing to special-case "audio doesn't exist yet".
+
+### ALSA engine (step 1 of 3)
+
+`makeAlsaEngine(captureFrom, playbackTo)`
+(`src/audio/src/alsa_audio_engine.cpp`) is the first real
+implementation, deliberately narrow: **one** mono route, 48 kHz S16_LE,
+capturing from one station's named capture device and writing each
+period straight out to another station's named playback device, on its
+own `std::jthread`. It proves the ALSA plumbing in isolation --
+open/configure via `snd_pcm_set_params()` (the `plug` layer in
+`config/asound.conf` handles any rate/format conversion the codec needs),
+playback primed with one period short of a full buffer of silence
+(~40 ms of slack before an underrun, and roughly the route's latency),
+and overrun/underrun/suspend recovery via `snd_pcm_recover()`. `start()`
+never throws on a device problem: it logs why and leaves `isRunning()`
+false, and so does an unrecoverable error on the audio thread later --
+audio failing shouldn't take the bell down with it.
+
+**Not yet wired into the daemon**: `daemon_main.cpp` still runs
+`makeNullEngine()`. The remaining steps:
+
+2. Both stations at once, a lock-free queue to the reactor thread, and
+   real-time scheduling for the audio thread(s). Blocked on
+   `config/asound.conf` first: all four named devices are `plug` aliases
+   onto the one `hw:Zero`, and a raw `hw` device only allows one capture
+   stream open at a time -- a second station's capture needs `dsnoop`
+   (and shared playback `dmix`) there, which that file's own caveats say
+   to verify on real hardware first.
+3. Swap it in as the daemon's engine and test against a real Pi Zero +
+   Codec Zero. **Open design question for this step**: `config/asound.conf`
+   currently says the live door/inside audio runs entirely inside the
+   DA7212 codec's own analog crossbar (set once at boot by alsactl), with
+   these PCM devices reserved for intercomd's own sounds. A digital
+   door->inside route on top of that would double the audio, so step 3
+   has to pick one path for live audio, not run both.
+
+Tested without a sound card by `tests/alsa_engine_tests.cpp`: it points
+`HOME` at a scratch `.asoundrc` defining test PCMs on alsa-lib's own
+`file` plugin over its `null` device. Capture reads a known sample
+pattern from a FIFO -- not a regular file, because `null` isn't paced in
+real time and the engine would otherwise spin at hundreds of MB/s; over
+a FIFO it consumes exactly what the test wrote and then blocks -- and the
+test checks the pattern arrives in the playback file bit-exact, with no
+dropped, repeated, or reordered samples (confirmed to catch a deliberately
+duplicated period and a deliberately dropped sample per period).
 
 When it's implemented, it should **not** join the reactor thread. Two mono
 ALSA duplex streams against the Codec Zero (handset audio, and
@@ -607,7 +653,7 @@ third-party framework (Catch2/doctest/GTest) via `FetchContent`, so
 is a ~20-line `CHECK()` macro. Swapping in a real framework later is a
 one-file change once the suite outgrows that.
 
-Six `ctest` cases: `icom_tests` covers `MockBackend` output/input
+Seven `ctest` cases: `icom_tests` covers `MockBackend` output/input
 behavior, that an injected mock edge reaches an `EventLoop` callback
 end-to-end (the same path `Tcm1171Controller` depends on in production),
 `EventLoop::post()`, and `LoopThread` (confirming a posted callback
@@ -624,6 +670,9 @@ just realism: see "Software PWM" for why `~StatusLed()` requires an
 actively-running loop). `icom_pwm_tests` covers `Pwm` the same way:
 construction/`setDutyTime()` clamping, and that 0%/100%/partial duty
 actually produce the expected pin behavior over a real background loop.
+`icom_audio_tests` covers the ALSA engine with no sound card, via
+file-backed test PCMs: bad device names leave it stopped, and a known
+sample pattern arrives bit-exact at playback (see "Audio boundary").
 `architecture_invariants` just runs
 `scripts/check_architecture_invariants.sh` (see "Architecture
 invariants"). `GpiodBackend` isn't in this `ctest` suite (host-dev builds
@@ -642,9 +691,9 @@ Roughly in the order it'd need doing to become a real intercom:
    assignments"); fix polarity/line numbers.
 2. Pulse-dial decoding off the same hook-detect edges
    `Tcm1171Controller` already timestamps.
-3. A real `IEngine` against the Codec Zero (ALSA duplex, its own
-   thread(s), a ring/tone generator for the TCM1171's ring cadence),
-   opening the named devices `StationRegistry` already hands it.
+3. Finish the ALSA `IEngine` (step 1 of 3 done -- see "Audio boundary"
+   for steps 2 and 3), plus a ring/tone generator for the TCM1171's ring
+   cadence.
 4. Verified per-channel routing in `config/asound.conf` (currently plain
    1:1 aliases -- see that file's caveats) once there's real hardware to
    check `route`/channel indices against.

@@ -33,6 +33,13 @@ target_link_libraries(icom_pwm_tests PRIVATE icom::core icom::gpio icom::hw icom
 
 add_test(NAME icom_pwm_tests COMMAND icom_pwm_tests)
 
+add_executable(icom_audio_tests
+    alsa_engine_tests.cpp
+)
+target_link_libraries(icom_audio_tests PRIVATE icom::audio icom::config icom::warnings)
+
+add_test(NAME icom_audio_tests COMMAND icom_audio_tests)
+
 # Enforces the "future-proofing for the network extension" architecture
 # invariants (docs/ARCHITECTURE.md "Architecture invariants") on every
 # `ctest` run, not just when someone remembers to run the script by hand.

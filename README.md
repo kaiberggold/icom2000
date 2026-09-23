@@ -14,7 +14,8 @@ placeholder, and why the code is shaped the way it is.
 - CMake >= 3.25, Ninja
 - A C++20 compiler (GCC 12+ on target -- Raspberry Pi OS Bookworm; any
   reasonably recent GCC/Clang on your dev host)
-- Host dev/test build: nothing else -- GPIO is mocked in-process.
+- Host dev/test build: `libsystemd-dev` (logging goes straight to the
+  journal) and `libasound2-dev` (ALSA) -- GPIO is mocked in-process.
 - Target build: an ARMv6-**capable** cross toolchain (**not** a generic
   Debian/Ubuntu `gcc-arm-linux-gnueabihf` -- confirmed, not just
   suspected, to silently produce ARMv7 binaries regardless of flags; see
@@ -87,7 +88,7 @@ src/core/   reactor (EventLoop) + LoopThread, signal handling, logging
 src/config/ File (INI-style config reader), StationRegistry
 src/gpio/   IOutputPin/IInputPin interfaces + mock and libgpiod backends
 src/hw/     Pwm (software PWM), BellController, StatusLed, Tcm1171Controller
-src/audio/  IEngine interface (stubbed -- see docs/ARCHITECTURE.md)
+src/audio/  IEngine interface, no-op engine, first ALSA engine (not wired in yet)
 src/ipc/    Unix-socket control protocol + server
 src/app/    intercomd (composition root)
 src/cli/    intercomctl

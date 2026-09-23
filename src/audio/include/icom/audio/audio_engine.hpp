@@ -38,4 +38,22 @@ public:
 // (src/app/daemon_main.cpp) once a real ALSA-backed Engine exists.
 std::unique_ptr<IEngine> makeNullEngine(const config::StationRegistry& stations);
 
+// ALSA-backed engine, first step (see docs/ARCHITECTURE.md "Audio
+// boundary"): one mono route, capturing from `captureFrom`'s capture
+// device and playing it straight out on `playbackTo`'s playback device, on
+// its own thread. Not yet used by the daemon, which still runs
+// makeNullEngine().
+//
+// start() never throws on a device problem: if either device can't be
+// opened or configured, it logs why and leaves isRunning() false -- as
+// does an unrecoverable error on the audio thread later -- so the daemon
+// keeps ringing the bell and reports audio=down rather than dying over
+// audio alone.
+//
+// Passing the same station twice routes its mic into its own speaker:
+// fine for a bench test with headphones, acoustic feedback on the real
+// handset/door unit.
+std::unique_ptr<IEngine> makeAlsaEngine(const config::Station& captureFrom,
+                                        const config::Station& playbackTo);
+
 } // namespace icom::audio

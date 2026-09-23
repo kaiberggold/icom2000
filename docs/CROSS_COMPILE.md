@@ -115,7 +115,7 @@ sudo apt install qemu-user-static debootstrap  # or: podman/docker + an arm32v7-
 # commands depend on your host distro's QEMU packaging.)
 
 # Once inside the chroot (now effectively "on" an armv6 Raspberry Pi OS):
-sudo apt install build-essential cmake ninja-build libgpiod-dev
+sudo apt install build-essential cmake ninja-build libgpiod-dev libsystemd-dev libasound2-dev
 cd /path/to/icom2000   # bind-mount the source tree into the chroot
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DICOM_BUILD_TESTS=OFF
 cmake --build build
@@ -253,16 +253,14 @@ genuinely-matching ARMv6 copy is a real Raspberry Pi OS sysroot, the same
 way "Two ways to get libgpiod" describes for the non-build-from-source
 path (`ICOM_LIBGPIOD_BUILD_FROM_SOURCE=OFF`) below. Point
 `ICOM_PI_SYSROOT` at a Raspberry Pi OS filesystem (rsynced from a real Pi,
-or extracted from an image) that already has `libsystemd-dev` installed --
-the toolchain file already wires `PKG_CONFIG_SYSROOT_DIR`/
-`PKG_CONFIG_LIBDIR` from it (`cmake/toolchain-arm-linux-gnueabihf.cmake`),
-so the top-level `pkg_check_modules(SYSTEMD REQUIRED IMPORTED_TARGET
-libsystemd)` in `CMakeLists.txt` finds it the same way `PkgConfig::GPIOD`
-does in "Building libgpiod from source" below. You'd want the same sysroot
-anyway for a library that genuinely has to match the target Raspberry Pi
-OS build exactly and isn't practical to cross-build yourself -- ALSA
-(`libasound`), when the real `IEngine` implementation arrives, is the
-likely future example.
+or extracted from an image) that already has `libsystemd-dev` **and
+`libasound2-dev`** installed -- the ALSA engine (`src/audio`) needs
+`libasound` from the same sysroot, for the same reason. The toolchain file
+already wires `PKG_CONFIG_SYSROOT_DIR`/`PKG_CONFIG_LIBDIR` from it
+(`cmake/toolchain-arm-linux-gnueabihf.cmake`), so the `pkg_check_modules()`
+calls for `libsystemd` (top-level `CMakeLists.txt`) and `alsa`
+(`src/audio/CMakeLists.txt`) find them the same way `PkgConfig::GPIOD`
+does in "Building libgpiod from source" below.
 
 If getting a real ARMv6 toolchain turns out to be more yak-shaving than
 it's worth, fall back to Option A -- it needs no custom toolchain at all.

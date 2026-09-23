@@ -48,7 +48,8 @@ This gets you, all driven from inside VS Code:
 
 ```sh
 sudo apt update
-sudo apt install build-essential cmake ninja-build gdb-multiarch openssh-client git astyle
+sudo apt install build-essential cmake ninja-build gdb-multiarch openssh-client git astyle \
+    libsystemd-dev libasound2-dev
 ```
 
 `astyle` is a separate concern from everything else here: it's what
