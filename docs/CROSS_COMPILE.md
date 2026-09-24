@@ -115,7 +115,7 @@ sudo apt install qemu-user-static debootstrap  # or: podman/docker + an arm32v7-
 # commands depend on your host distro's QEMU packaging.)
 
 # Once inside the chroot (now effectively "on" an armv6 Raspberry Pi OS):
-sudo apt install build-essential cmake ninja-build libgpiod-dev libsystemd-dev libasound2-dev
+sudo apt install build-essential cmake ninja-build libgpiod-dev libasound2-dev
 cd /path/to/icom2000   # bind-mount the source tree into the chroot
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DICOM_BUILD_TESTS=OFF
 cmake --build build
@@ -233,9 +233,9 @@ source ~/.bashrc
 which armv6-rpi-linux-gnueabihf-gcc   # sanity check before building
 armv6-rpi-linux-gnueabihf-gcc --version
 
-# 6. Build icom2000 with it -- ICOM_PI_SYSROOT is required (see below):
+# 6. Build icom2000 with it:
 cd /path/to/icom2000
-cmake --preset pi0-release -DICOM_PI_SYSROOT=/path/to/a/raspberry-pi-os-sysroot
+cmake --preset pi0-release
 cmake --build --preset pi0-release
 ```
 
@@ -243,24 +243,20 @@ cmake --build --preset pi0-release
 safety feature, not a bug to work around), and legitimately shouldn't
 need to be root for anything it does.
 
-`ICOM_PI_SYSROOT` **is** needed for this option, unconditionally --
-`icom::core::Logger` links `libsystemd` (`sd_journal_send()`, see
-docs/ARCHITECTURE.md "Logging"), and unlike libgpiod there is no
-`ICOM_LIBGPIOD_BUILD_FROM_SOURCE`-style "cross-compile it from source
-instead" escape hatch for it: `libsystemd` is tightly coupled to the exact
-systemd build it ships with, so the only practical way to get a
-genuinely-matching ARMv6 copy is a real Raspberry Pi OS sysroot, the same
-way "Two ways to get libgpiod" describes for the non-build-from-source
-path (`ICOM_LIBGPIOD_BUILD_FROM_SOURCE=OFF`) below. Point
-`ICOM_PI_SYSROOT` at a Raspberry Pi OS filesystem (rsynced from a real Pi,
-or extracted from an image) that already has `libsystemd-dev` **and
-`libasound2-dev`** installed -- the ALSA engine (`src/audio`) needs
-`libasound` from the same sysroot, for the same reason. The toolchain file
-already wires `PKG_CONFIG_SYSROOT_DIR`/`PKG_CONFIG_LIBDIR` from it
-(`cmake/toolchain-arm-linux-gnueabihf.cmake`), so the `pkg_check_modules()`
-calls for `libsystemd` (top-level `CMakeLists.txt`) and `alsa`
-(`src/audio/CMakeLists.txt`) find them the same way `PkgConfig::GPIOD`
-does in "Building libgpiod from source" below.
+No `ICOM_PI_SYSROOT` needed. A toolchain built this way ships only its
+own compiler and C library -- no Raspberry Pi OS libraries at all -- so
+everything `intercomd` links beyond that is built from source as part of
+the build: libgpiod and alsa-lib (see the two sections below). Logging
+needs no library: it speaks the journal's socket protocol directly
+rather than linking `libsystemd` (docs/ARCHITECTURE.md "Logging").
+
+The toolchain file deliberately points pkg-config *only* at
+`ICOM_PI_SYSROOT`, never at your dev machine's own libraries -- so a
+package you `apt install` on the dev machine (e.g. `libasound2-dev`) is
+invisible to a cross build, by design: it's an x86 library that must
+never end up linked into an ARM binary. A `Package '...' not found` from
+a `pi0-*` configure means that library needs a from-source recipe or a
+sysroot, never a host package.
 
 If getting a real ARMv6 toolchain turns out to be more yak-shaving than
 it's worth, fall back to Option A -- it needs no custom toolchain at all.
@@ -300,6 +296,45 @@ OS filesystem, and rebuilding it yourself is pure waste), set
 `-DICOM_LIBGPIOD_BUILD_FROM_SOURCE=OFF`: this falls back to the previous
 `pkg_check_modules` lookup against `ICOM_PI_SYSROOT`, requiring both
 `libgpiod.pc` and `libgpiodcxx.pc` to be present there.
+
+## Building alsa-lib from source
+
+`ICOM_ALSA_BUILD_FROM_SOURCE` (default `ON` whenever cross-compiling, `OFF`
+on `host-dev`, which uses the dev machine's own `libasound2-dev`)
+cross-compiles alsa-lib (`libasound`, which the ALSA audio engine links)
+the same way (`src/audio/cmake/BuildAlsaLibFromSource.cmake`): fetched
+as a git tag (`ICOM_ALSA_LIB_GIT_TAG`, default `v1.2.8`) from
+`ICOM_ALSA_LIB_GIT_URL` (default the project's GitHub repository), built
+as a static library with the toolchain's own C compiler and the same
+ARMv6 flags, and linked into `intercomd` -- so there's still no `.so` to
+deploy. Adds well under a minute to a clean build.
+
+Requires `autoconf`, `automake`, `libtool` and `make` on the **host**
+(`apt install autoconf automake libtool make`): a git checkout doesn't
+include alsa-lib's generated `configure` script, so the build runs
+`autoreconf` first.
+
+Two details that matter at runtime on the Pi:
+
+- It's configured with `--prefix=/usr` (and only *installed* to a
+  staging directory), because libasound compiles in the directory it
+  reads its own config from -- `/usr/share/alsa/alsa.conf` -- and that
+  has to be the Pi's.
+- Keep `ICOM_ALSA_LIB_GIT_TAG` matched to the Pi's own library version
+  (`dpkg -s libasound2 | grep Version` on the Pi; `v1.2.8` is Raspberry
+  Pi OS Bookworm's). The library reads the Pi's installed `alsa.conf`, and
+  a library older than that config could meet syntax it doesn't know.
+
+Components this project doesn't use are left out (`--disable-ucm
+--disable-topology --disable-rawmidi --disable-hwdep --disable-seq
+--disable-python`); PCM and all of alsa-lib's built-in PCM plugins
+(`plug`, `dmix`, `dsnoop`, `route`, ...) stay in. Plugins that live in
+separate `.so` files (`libasound_module_*`, e.g. PulseAudio's) can't be
+loaded by a statically linked libasound -- `config/asound.conf` uses none.
+
+To use a libasound that's already in a sysroot instead, set
+`-DICOM_ALSA_BUILD_FROM_SOURCE=OFF` together with `ICOM_PI_SYSROOT`
+(needs `libasound2-dev` installed in that sysroot).
 
 ## intercomd carries its own C++ runtime
 

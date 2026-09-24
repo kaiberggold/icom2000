@@ -1,4 +1,5 @@
 #include "icom/core/logger.hpp"
+#include "icom/core/journal.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -9,15 +10,13 @@
 #include <unordered_map>
 #include <vector>
 
-#include <systemd/sd-journal.h>
-
 namespace icom::core {
 
 namespace {
 
-// The journal's PRIORITY field reuses the same LOG_* scale syslog(3) does
-// (see sd-journal.h), so this mapping is identical to what a syslog(3)
-// implementation of Logger::log() would need.
+// The journal's PRIORITY field reuses the same LOG_* scale syslog(3) does,
+// so this mapping is identical to what a syslog(3) implementation of
+// Logger::log() would need.
 int journalPriority(LogLevel level) {
     switch (level) {
         case LogLevel::DEBUG: return LOG_DEBUG;
@@ -119,13 +118,16 @@ void Logger::log(LogLevel level, std::string_view message) const {
     // the plain 0-23 facility number the journal field expects; `facility`
     // itself is stored pre-shifted, matching the LOG_DAEMON-style constant
     // callers pass to initJournal().
-    ::sd_journal_send(
-        "MESSAGE=[%s] %.*s", component_.c_str(), static_cast<int>(message.size()), message.data(),
-        "PRIORITY=%d", journalPriority(level),
-        "SYSLOG_IDENTIFIER=%s", identity.ident.c_str(),
-        "SYSLOG_FACILITY=%d", LOG_FAC(identity.facility),
-        "ICOM_COMPONENT=%s", component_.c_str(),
-        nullptr);
+    const std::string text = "[" + component_ + "] " + std::string(message);
+    const std::string priority = std::to_string(journalPriority(level));
+    const std::string facility = std::to_string(LOG_FAC(identity.facility));
+    sendJournalEntry(encodeJournalEntry({
+        {"MESSAGE", text},
+        {"PRIORITY", priority},
+        {"SYSLOG_IDENTIFIER", identity.ident},
+        {"SYSLOG_FACILITY", facility},
+        {"ICOM_COMPONENT", component_},
+    }));
     if (consoleOutputEnabled.load(std::memory_order_relaxed)) {
         // Built as one string and written with a single `<<` (std::endl to
         // flush immediately, so it shows up in a VS Code Debug Console

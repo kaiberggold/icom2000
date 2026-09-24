@@ -1,11 +1,11 @@
 // Covers the pure logic in icom::core::Logger/getLogger/configureLevels:
 // registry identity, level filtering, and configureLevels()'s parsing and
-// "validate everything before applying anything" contract. Does NOT check
-// that messages actually reach the journal -- that needs a real (or faked)
-// sd_journal_send() receiver, which was verified manually against this
-// build (see the commit message / docs/ARCHITECTURE.md "Logging"); it
-// isn't something worth automating a fake journal socket receiver for in
-// this suite.
+// "validate everything before applying anything" contract -- plus the
+// journal protocol writer (icom/core/journal.hpp): its encoding, and that
+// sendJournalEntry() delivers exactly those bytes to a socket, here one
+// the test binds itself. That real journald accepts the encoding was
+// checked by hand against a running systemd-journald (see
+// docs/ARCHITECTURE.md "Logging").
 //
 // The logger registry is a process-wide singleton, so tests share it.
 // Each test below either uses a component name nothing else in this binary
@@ -14,10 +14,16 @@
 // order) left the *shared* default level at.
 #include "check.hpp"
 
+#include "icom/core/journal.hpp"
 #include "icom/core/logger.hpp"
 
 #include <cstdlib>
 #include <sstream>
+#include <string>
+
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <unistd.h>
 
 using namespace icom::core;
 
@@ -184,6 +190,48 @@ namespace
         CHECK(captured.str().empty());
     }
 
+    void testJournalEncodesPlainFieldsAsNameEqualsValue()
+    {
+        CHECK(encodeJournalEntry({{"MESSAGE", "hello"}, {"PRIORITY", "6"}}) == "MESSAGE=hello\nPRIORITY=6\n");
+    }
+
+    void testJournalEncodesMultilineValuesWithBinaryLength()
+    {
+        const std::string expected = std::string("MESSAGE\n") + std::string("\x03\0\0\0\0\0\0\0", 8) + "a\nb\n";
+        CHECK(encodeJournalEntry({{"MESSAGE", "a\nb"}}) == expected);
+    }
+
+    void testJournalSendDeliversTheEncodedBytes()
+    {
+        char dirTemplate[] = "/tmp/icom_journal_test_XXXXXX";
+        CHECK(::mkdtemp(dirTemplate) != nullptr);
+        const std::string path = std::string(dirTemplate) + "/socket";
+
+        const int receiver = ::socket(AF_UNIX, SOCK_DGRAM, 0);
+        sockaddr_un address{};
+        address.sun_family = AF_UNIX;
+        path.copy(address.sun_path, sizeof(address.sun_path) - 1);
+        CHECK(::bind(receiver, reinterpret_cast<const sockaddr*>(&address), sizeof(address)) == 0);
+
+        const std::string entry = encodeJournalEntry({{"MESSAGE", "line one\nline two"}, {"ICOM_COMPONENT", "x"}});
+        CHECK(sendJournalEntry(entry, path));
+
+        std::string received(entry.size() + 16, '\0');
+        const ssize_t got = ::recv(receiver, received.data(), received.size(), MSG_DONTWAIT);
+        CHECK(got == static_cast<ssize_t>(entry.size()));
+        received.resize(got > 0 ? static_cast<std::size_t>(got) : 0);
+        CHECK(received == entry);
+
+        ::close(receiver);
+        ::unlink(path.c_str());
+        ::rmdir(dirTemplate);
+    }
+
+    void testJournalSendToMissingSocketFailsWithoutBlocking()
+    {
+        CHECK(!sendJournalEntry("MESSAGE=x\n", "/nonexistent/icom2000-test/socket"));
+    }
+
 } // namespace
 
 int main()
@@ -204,6 +252,10 @@ int main()
     testConsoleOutputOffByDefaultWritesNothingToStderr();
     testConsoleOutputWhenEnabledWritesLevelComponentAndMessage();
     testConsoleOutputStillRespectsTheLoggerLevel();
+    testJournalEncodesPlainFieldsAsNameEqualsValue();
+    testJournalEncodesMultilineValuesWithBinaryLength();
+    testJournalSendDeliversTheEncodedBytes();
+    testJournalSendToMissingSocketFailsWithoutBlocking();
 
     const int failures = icom::testing::failureCount();
     if (failures > 0)

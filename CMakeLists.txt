@@ -27,17 +27,6 @@ option(ICOM_BUILD_TESTS "Build the unit test suite" ON)
 # directly.
 find_package(Threads REQUIRED)
 
-# icom::core::Logger writes straight to the systemd journal via
-# sd_journal_send() (see docs/ARCHITECTURE.md "Logging") -- a deliberate,
-# accepted portability tradeoff: this makes the whole project depend on
-# systemd, which is fine since the only deployment target (Raspberry Pi
-# OS) is itself systemd-based. Unlike libgpiod (src/gpio/CMakeLists.txt),
-# there's no "build it from source for the target" option here -- see
-# docs/CROSS_COMPILE.md -- so a cross build needs libsystemd-dev already
-# present in ICOM_PI_SYSROOT.
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(SYSTEMD REQUIRED IMPORTED_TARGET libsystemd)
-
 # Shared warning flags as an INTERFACE target rather than sprinkled into
 # every module's CMakeLists, so tightening them later is a one-line change.
 add_library(icom_warnings INTERFACE)

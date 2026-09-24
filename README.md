@@ -14,15 +14,15 @@ placeholder, and why the code is shaped the way it is.
 - CMake >= 3.25, Ninja
 - A C++20 compiler (GCC 12+ on target -- Raspberry Pi OS Bookworm; any
   reasonably recent GCC/Clang on your dev host)
-- Host dev/test build: `libsystemd-dev` (logging goes straight to the
-  journal) and `libasound2-dev` (ALSA) -- GPIO is mocked in-process.
+- Host dev/test build: `libasound2-dev` (ALSA) -- GPIO is mocked
+  in-process.
 - Target build: an ARMv6-**capable** cross toolchain (**not** a generic
   Debian/Ubuntu `gcc-arm-linux-gnueabihf` -- confirmed, not just
   suspected, to silently produce ARMv7 binaries regardless of flags; see
   [`docs/CROSS_COMPILE.md`](docs/CROSS_COMPILE.md), checked automatically
-  at configure time), plus `meson` and `ninja` on the host (libgpiod
-  cross-builds from source as part of the build -- no prebuilt armv6
-  libgpiod exists anywhere to install instead).
+  at configure time), plus `meson`, `ninja`, `autoconf`, `automake` and
+  `libtool` on the host (libgpiod and alsa-lib cross-build from source as
+  part of the build -- no Raspberry Pi sysroot needed).
 
 ## Build & test (dev host, mock GPIO)
 

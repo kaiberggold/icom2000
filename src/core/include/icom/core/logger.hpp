@@ -17,17 +17,17 @@ enum class LogLevel { DEBUG, INFO, WARN, ERROR };
 // exists is visible in one place (the registry) for whoever is tuning
 // levels.
 //
-// Writes go straight to the systemd journal via sd_journal_send() (see
-// docs/ARCHITECTURE.md "Logging") -- not syslog(3). This is a deliberate,
-// accepted portability tradeoff: it makes every log() call systemd-only,
-// which is fine since the sole deployment target (Raspberry Pi OS) is
-// itself systemd-based. The payoff is a custom, filterable journal field
-// per entry -- ICOM_COMPONENT=<component> -- so `journalctl
+// Writes go straight to the systemd journal in its native protocol (see
+// icom/core/journal.hpp and docs/ARCHITECTURE.md "Logging") -- not
+// syslog(3). That makes logging systemd-only at runtime, which is fine
+// since the sole deployment target (Raspberry Pi OS) is itself
+// systemd-based. The payoff is a custom, filterable journal field per
+// entry -- ICOM_COMPONENT=<component> -- so `journalctl
 // ICOM_COMPONENT=hw.bell` finds exactly one component's lines, something
-// plain syslog(3) text can't offer. sd_journal_send() never throws or
-// blocks the caller on failure (e.g. no journal socket present) -- worst
-// case a call here is a silent no-op, which is why nothing in this header
-// reports an error for a failed log().
+// plain syslog(3) text can't offer. A log() call never throws or blocks
+// on the journal: if it's absent or backed up, the entry is silently
+// dropped, which is why nothing in this header reports an error for a
+// failed log().
 class Logger {
 public:
     Logger(std::string component, LogLevel level);
@@ -96,10 +96,10 @@ void setConsoleOutput(bool enable);
 // Sets the SYSLOG_IDENTIFIER/SYSLOG_FACILITY journal fields every log()
 // call attaches from then on (`journalctl -t <ident>` matches on the
 // former). Call once, early in main(), before spawning any other thread.
-// Unlike openlog(3)/syslog(3), sd_journal_send() has no persistent
-// connection to open -- this just records `ident`/`facility` in a static
-// for log() to read on every call, so logging before this runs still
-// works; it just carries the default ident ("icom2000") until it does.
+// Unlike openlog(3)/syslog(3), there's no connection to open -- this just
+// records `ident`/`facility` in a static for log() to read on every call,
+// so logging before this runs still works; it just carries the default
+// ident ("icom2000") until it does.
 void initJournal(std::string_view ident, int facility = LOG_DAEMON);
 
 } // namespace icom::core

@@ -144,8 +144,8 @@ work onto it from the main thread), not a general invitation to reach for
 
 `icom::core::Logger` (`src/core/include/icom/core/logger.hpp`) is a named,
 independently-leveled logger -- roughly one per module -- writing straight
-to the systemd journal via `sd_journal_send()` (`libsystemd`), not
-`syslog(3)`. `journalctl -u intercomd` shows everything; `journalctl -t
+to the systemd journal in its native protocol, not `syslog(3)`.
+`journalctl -u intercomd` shows everything; `journalctl -t
 icom2000` filters by the process-wide identifier `initJournal()` sets in
 `main()`; `journalctl ICOM_COMPONENT=hw.bell` filters to just one
 component's lines, via a custom journal field every `log()` call attaches
@@ -154,18 +154,38 @@ component's lines, via a custom journal field every `log()` call attaches
 this module uses the journal API directly rather than going through
 syslog.
 
-This is a deliberate, accepted portability tradeoff: `sd_journal_send()` is
-systemd-specific, so this project is now Linux-and-systemd-only end to end.
-That costs nothing here -- the sole deployment target, Raspberry Pi OS, is
-itself systemd-based -- and it's a strictly stronger guarantee than the
-`syslog(3)` version this replaced, which merely assumed *something* was
-listening on `/dev/log` (journald, in practice, on every install this
-project targets anyway).
+This is a deliberate, accepted portability tradeoff: logging only works
+under systemd. That costs nothing here -- the sole deployment target,
+Raspberry Pi OS, is itself systemd-based -- and it's a strictly stronger
+guarantee than the `syslog(3)` version this replaced, which merely assumed
+*something* was listening on `/dev/log` (journald, in practice, on every
+install this project targets anyway).
+
+### The journal protocol, without libsystemd
+
+`libsystemd`'s `sd_journal_send()` would do the same job, but it would make
+`libsystemd` a build dependency, and the self-built ARMv6 cross toolchain
+(docs/CROSS_COMPILE.md) has no Raspberry Pi OS libraries to link it
+against without a whole Pi sysroot. What it puts on the wire is simple and
+documented (https://systemd.io/JOURNAL_NATIVE_PROTOCOL/), so
+`icom/core/journal.hpp` does that directly instead: one `AF_UNIX` datagram
+to `/run/systemd/journal/socket` per entry, each field `NAME=value\n`, or
+-- for a value containing a newline -- `NAME\n`, the value's length as a
+64-bit little-endian integer, then the raw value and `\n`. Every entry
+carries `MESSAGE=[component] text`, `PRIORITY`, `SYSLOG_IDENTIFIER`,
+`SYSLOG_FACILITY` and `ICOM_COMPONENT`.
+
+Two deliberate differences from `sd_journal_send()`: the send is
+non-blocking (`MSG_DONTWAIT`), so if journald is backed up an entry is
+dropped rather than stalling the caller -- which matters once the audio
+thread logs an underrun -- and an entry too big for one datagram is
+dropped too, where libsystemd would fall back to passing a memfd. Log
+lines here are far below that limit.
 
 (This module started from a request to log "to the kernel log" --
 `/dev/kmsg`/`dmesg`. That's a real, different thing: writing `/dev/kmsg`
 requires `CAP_SYSLOG` or root and shows up in `dmesg` whether or not a log
-daemon is even running, whereas both `syslog(3)` and `sd_journal_send()`
+daemon is even running, whereas both `syslog(3)` and the journal socket
 need no special privilege but require something listening on the other
 end. This project logs to the journal -- it's the conventional destination
 for a userspace daemon's own logs under systemd, works with the
@@ -245,21 +265,16 @@ matter which TU that first use comes from.
 
 `tests/logger_tests.cpp` covers the registry (identity, per-component
 levels) and `configureLevels()`'s parsing, including that a rejected spec
-changes nothing. It does not check that a message actually reaches the
-journal -- that was instead verified manually against this exact build, by
-standing up a throwaway `AF_UNIX SOCK_DGRAM` listener at
-`/run/systemd/journal/socket` (the native journal protocol's endpoint) and
-running `intercomd` against it (there's no standing fake-journal fixture in
-the repo; it isn't worth automating a Unix-socket receiver for one
-integration check when `sd_journal_send()` is a stable, documented
-`libsystemd` API). That capture confirmed every field lands as designed:
-`MESSAGE=[component] text`, `PRIORITY`, `SYSLOG_IDENTIFIER=icom2000`,
-`SYSLOG_FACILITY`, and the new `ICOM_COMPONENT=<component>` tag --
-`sd_journal_send()` is itself a macro wrapping
-`sd_journal_send_with_location()`, so `CODE_FILE`/`CODE_LINE`/`CODE_FUNC`
-also show up for free (pointing at `Logger::log()`'s own call site in
-`logger.cpp`, not each caller -- accurate, if not especially useful, so
-nothing here relies on it).
+changes nothing -- plus the journal writer: both field encodings, that
+`sendJournalEntry()` delivers exactly the encoded bytes to a socket the
+test binds itself, and that a missing socket fails without blocking.
+
+That real journald accepts the encoding isn't in the suite (it needs a
+running `systemd-journald`), so it was checked by hand: with a
+`systemd-journald` running, `intercomd`'s entries came back through
+`journalctl ICOM_COMPONENT=hw.pwm` and `journalctl -t icom2000` with every
+field intact, and a message containing a newline and a tab came back
+byte-for-byte through the binary-length encoding.
 
 ## GPIO abstraction
 
@@ -660,8 +675,8 @@ end-to-end (the same path `Tcm1171Controller` depends on in production),
 genuinely runs on its background thread, not just eventually). Threaded
 tests there use a real background thread rather than faking one, since
 `post()`'s whole point is being safe to call across real threads.
-`icom_logger_tests` covers the logging registry and `configureLevels()`
-parsing (see "Logging" above). `icom_config_tests` covers `File` parsing
+`icom_logger_tests` covers the logging registry, `configureLevels()`
+parsing, and the journal protocol writer (see "Logging" above). `icom_config_tests` covers `File` parsing
 (including the missing-vs-malformed-file distinction) and
 `StationRegistry`'s defaults/overrides (see "Configuration" above).
 `icom_hw_tests` covers `StatusLed` -- on/off state tracking, and

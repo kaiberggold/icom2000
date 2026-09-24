@@ -1,5 +1,6 @@
 add_library(icom_core STATIC
     src/logger.cpp
+    src/journal.cpp
     src/event_loop.cpp
     src/signal_watcher.cpp
     src/loop_thread.cpp
@@ -11,4 +12,4 @@ target_include_directories(icom_core PUBLIC
 )
 
 target_compile_features(icom_core PUBLIC cxx_std_20)
-target_link_libraries(icom_core PUBLIC Threads::Threads PRIVATE icom::warnings PkgConfig::SYSTEMD)
+target_link_libraries(icom_core PUBLIC Threads::Threads PRIVATE icom::warnings)

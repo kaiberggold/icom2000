@@ -17,7 +17,7 @@
         {
             "name": "pi0-release",
             "displayName": "Raspberry Pi Zero (armv6) cross release build",
-            "description": "Cross-compiles for the Pi Zero 1.1 (ARM1176JZF-S, armv6). Requires an armv6-CAPABLE arm-linux-gnueabihf toolchain -- see docs/CROSS_COMPILE.md; a plain 'apt install gcc-arm-linux-gnueabihf' (Debian/Ubuntu) is confirmed NOT to qualify, and the configure step will refuse to proceed with one. libgpiod is cross-built from source automatically (ICOM_LIBGPIOD_BUILD_FROM_SOURCE, on by default) -- no prebuilt armv6 libgpiod needed for it. libsystemd and libasound have no such source-build option, though -- pass -DICOM_PI_SYSROOT=/path/to/a/raspberry-pi-os-sysroot (with libsystemd-dev and libasound2-dev installed there) or the configure step fails looking for them.",
+            "description": "Cross-compiles for the Pi Zero 1.1 (ARM1176JZF-S, armv6). Requires an armv6-CAPABLE arm-linux-gnueabihf toolchain -- see docs/CROSS_COMPILE.md; a plain 'apt install gcc-arm-linux-gnueabihf' (Debian/Ubuntu) is confirmed NOT to qualify, and the configure step will refuse to proceed with one. libgpiod and alsa-lib are cross-built from source automatically (ICOM_LIBGPIOD_BUILD_FROM_SOURCE, ICOM_ALSA_BUILD_FROM_SOURCE, both on by default) -- no sysroot needed, but meson, ninja, autoconf, automake and libtool must be installed on the host.",
             "generator": "Ninja",
             "binaryDir": "${sourceDir}/build/pi0-release",
             "toolchainFile": "${sourceDir}/cmake/toolchain-arm-linux-gnueabihf.cmake",
