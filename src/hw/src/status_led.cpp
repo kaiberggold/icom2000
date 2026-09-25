@@ -63,7 +63,8 @@ namespace icom::hw
         {
             return;
         }
-        log.debug("blinking " + std::to_string(times) + " time(s)");
+        log.debug("blinking " + std::to_string(times) + " time(s), " + std::to_string(onDuration.count()) +
+                  " ms on / " + std::to_string(offDuration.count()) + " ms off");
         blinkLoop_.store(&loop);
         remaining_ = times;
         onDuration_ = onDuration;
