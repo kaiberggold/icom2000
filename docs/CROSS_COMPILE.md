@@ -307,7 +307,10 @@ as a git tag (`ICOM_ALSA_LIB_GIT_TAG`, default `v1.2.8`) from
 `ICOM_ALSA_LIB_GIT_URL` (default the project's GitHub repository), built
 as a static library with the toolchain's own C compiler and the same
 ARMv6 flags, and linked into `intercomd` -- so there's still no `.so` to
-deploy. Adds well under a minute to a clean build.
+deploy. Adds well under a minute to a clean build, and only to that:
+both this and the libgpiod build run once per build directory
+(`UPDATE_DISCONNECTED`), so later builds skip them entirely unless their
+`*_GIT_TAG` changes, which re-fetches and rebuilds just that library.
 
 Requires `autoconf`, `automake`, `libtool` and `make` on the **host**
 (`apt install autoconf automake libtool make`): a git checkout doesn't

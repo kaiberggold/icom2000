@@ -95,6 +95,10 @@ endian = 'little'
         GIT_REPOSITORY "${ICOM_LIBGPIOD_GIT_URL}"
         GIT_TAG "${ICOM_LIBGPIOD_GIT_TAG}"
         GIT_SHALLOW TRUE
+        # Same as alsa-lib's recipe: skip the per-build git update (and the
+        # reconfigure/rebuild/reinstall it triggers) for a pinned tag;
+        # changing ICOM_LIBGPIOD_GIT_TAG still re-fetches.
+        UPDATE_DISCONNECTED TRUE
         PREFIX "${_icom_libgpiod_root}"
         INSTALL_DIR "${_icom_libgpiod_install_dir}"
         CONFIGURE_COMMAND
