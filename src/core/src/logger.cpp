@@ -1,4 +1,5 @@
 #include "icom/core/logger.hpp"
+#include "icom/core/journal.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -13,7 +14,10 @@ namespace icom::core {
 
 namespace {
 
-int toSyslogPriority(LogLevel level) {
+// The journal's PRIORITY field reuses the same LOG_* scale syslog(3) does,
+// so this mapping is identical to what a syslog(3) implementation of
+// Logger::log() would need.
+int journalPriority(LogLevel level) {
     switch (level) {
         case LogLevel::DEBUG: return LOG_DEBUG;
         case LogLevel::INFO:  return LOG_INFO;
@@ -36,6 +40,22 @@ const char* levelName(LogLevel level) {
 // Set via setConsoleOutput(); read on every Logger::log() call, so a
 // plain std::atomic rather than something guarded by Registry::mutex.
 std::atomic<bool> consoleOutputEnabled{false};
+
+// Set via initJournal(), read on every Logger::log() call to fill in the
+// SYSLOG_IDENTIFIER/SYSLOG_FACILITY journal fields. A function-local
+// static rather than a plain global for the same reason Registry is (see
+// registry() below); not synchronized against concurrent log() calls,
+// per initJournal()'s documented "call once, before spawning any other
+// thread" contract in logger.hpp.
+struct JournalIdentity {
+    std::string ident = "icom2000";
+    int facility = LOG_DAEMON;
+};
+
+JournalIdentity& journalIdentity() {
+    static JournalIdentity instance;
+    return instance;
+}
 
 std::string_view trim(std::string_view s) {
     const auto isSpace = [](unsigned char c) { return std::isspace(c) != 0; };
@@ -89,8 +109,25 @@ void Logger::log(LogLevel level, std::string_view message) const {
     if (level < level_.load(std::memory_order_relaxed)) {
         return;
     }
-    ::syslog(toSyslogPriority(level), "[%s] %.*s", component_.c_str(),
-             static_cast<int>(message.size()), message.data());
+    const JournalIdentity& identity = journalIdentity();
+    // MESSAGE keeps the old "[component] text" shape too, so a plain
+    // `journalctl` (which only shows MESSAGE by default) stays readable
+    // without needing to know about ICOM_COMPONENT -- that field is there
+    // for filtering (`journalctl ICOM_COMPONENT=hw.bell`), not to replace
+    // the human-readable line. LOG_FAC() unshifts SYSLOG_FACILITY back to
+    // the plain 0-23 facility number the journal field expects; `facility`
+    // itself is stored pre-shifted, matching the LOG_DAEMON-style constant
+    // callers pass to initJournal().
+    const std::string text = "[" + component_ + "] " + std::string(message);
+    const std::string priority = std::to_string(journalPriority(level));
+    const std::string facility = std::to_string(LOG_FAC(identity.facility));
+    sendJournalEntry(encodeJournalEntry({
+        {"MESSAGE", text},
+        {"PRIORITY", priority},
+        {"SYSLOG_IDENTIFIER", identity.ident},
+        {"SYSLOG_FACILITY", facility},
+        {"ICOM_COMPONENT", component_},
+    }));
     if (consoleOutputEnabled.load(std::memory_order_relaxed)) {
         // Built as one string and written with a single `<<` (std::endl to
         // flush immediately, so it shows up in a VS Code Debug Console
@@ -189,14 +226,10 @@ void setConsoleOutput(bool enable) {
     consoleOutputEnabled.store(enable, std::memory_order_relaxed);
 }
 
-void initSyslog(std::string_view ident, int facility) {
-    // openlog(3) keeps the `ident` pointer, it does not copy the string --
-    // this static gives it something that outlives every future syslog()
-    // call instead of trusting whatever the caller passed in to still be
-    // alive then.
-    static std::string identStorage;
-    identStorage.assign(ident);
-    ::openlog(identStorage.c_str(), LOG_PID | LOG_NDELAY, facility);
+void initJournal(std::string_view ident, int facility) {
+    JournalIdentity& identity = journalIdentity();
+    identity.ident.assign(ident);
+    identity.facility = facility;
 }
 
 } // namespace icom::core

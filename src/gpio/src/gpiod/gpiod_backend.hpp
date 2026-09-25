@@ -9,10 +9,10 @@ namespace icom::gpio {
 // ICOM_WITH_LIBGPIOD is ON (see cmake/toolchain-arm-linux-gnueabihf.cmake
 // and the pi0-release CMake preset) -- host dev builds use MockBackend
 // instead so nobody needs a GPIO chip to build or run the tests.
-class GpiodBackend final : public Backend {
+class GpiodBackend final : public IBackend {
 public:
-    std::unique_ptr<OutputPin> requestOutput(const PinConfig& config, Level initial) override;
-    std::unique_ptr<InputPin> requestInput(const PinConfig& config, Edge edge) override;
+    std::unique_ptr<IOutputPin> requestOutput(const PinConfig& config, Level initial) override;
+    std::unique_ptr<IInputPin> requestInput(const PinConfig& config, Edge edge) override;
 };
 
 } // namespace icom::gpio

@@ -45,7 +45,7 @@ std::chrono::steady_clock::time_point toTimePoint(std::uint64_t timestampNs) {
     return std::chrono::steady_clock::time_point(std::chrono::nanoseconds(timestampNs));
 }
 
-class GpiodOutputPin final : public OutputPin {
+class GpiodOutputPin final : public IOutputPin {
 public:
     GpiodOutputPin(::gpiod::line_request request, unsigned line, Level initial)
         : request_(std::move(request)), line_(line), driven_(initial) {}
@@ -66,7 +66,7 @@ private:
     std::atomic<Level> driven_;
 };
 
-class GpiodInputPin final : public InputPin {
+class GpiodInputPin final : public IInputPin {
 public:
     GpiodInputPin(::gpiod::line_request request, unsigned line)
         : request_(std::move(request)), line_(line) {}
@@ -92,14 +92,14 @@ private:
     // C++ API (confirmed against the real header -- this file wasn't
     // compile-tested when first written, see the file-level comment
     // above), even though reading a pin's value is logically const from
-    // InputPin::read()'s perspective, same as any other hardware read.
+    // IInputPin::read()'s perspective, same as any other hardware read.
     mutable ::gpiod::line_request request_;
     unsigned line_;
 };
 
 } // namespace
 
-std::unique_ptr<OutputPin> GpiodBackend::requestOutput(const PinConfig& config, Level initial) {
+std::unique_ptr<IOutputPin> GpiodBackend::requestOutput(const PinConfig& config, Level initial) {
     ::gpiod::chip chip(chipPath(config.chip));
 
     ::gpiod::line_settings settings;
@@ -117,7 +117,7 @@ std::unique_ptr<OutputPin> GpiodBackend::requestOutput(const PinConfig& config, 
     return std::make_unique<GpiodOutputPin>(std::move(request), config.line, initial);
 }
 
-std::unique_ptr<InputPin> GpiodBackend::requestInput(const PinConfig& config, Edge edge) {
+std::unique_ptr<IInputPin> GpiodBackend::requestInput(const PinConfig& config, Edge edge) {
     ::gpiod::chip chip(chipPath(config.chip));
 
     ::gpiod::line_settings settings;

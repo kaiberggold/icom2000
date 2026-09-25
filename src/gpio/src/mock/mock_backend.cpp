@@ -15,7 +15,7 @@ namespace icom::gpio
     namespace
     {
 
-        class MockOutputPin final : public OutputPin
+        class MockOutputPin final : public IOutputPin
         {
         public:
             explicit MockOutputPin(PinConfig config, Level initial)
@@ -35,7 +35,7 @@ namespace icom::gpio
             std::atomic<Level> level_;
         };
 
-        class MockInputPin final : public InputPin
+        class MockInputPin final : public IInputPin
         {
         public:
             explicit MockInputPin(PinConfig config) : config_(std::move(config))
@@ -99,21 +99,21 @@ namespace icom::gpio
 
     } // namespace
 
-    std::unique_ptr<OutputPin> MockBackend::requestOutput(const PinConfig& config, Level initial)
+    std::unique_ptr<IOutputPin> MockBackend::requestOutput(const PinConfig& config, Level initial)
     {
         log.debug("requesting output " + config.chip + ":" + std::to_string(config.line) + " (" +
                   config.consumer + ")");
         return std::make_unique<MockOutputPin>(config, initial);
     }
 
-    std::unique_ptr<InputPin> MockBackend::requestInput(const PinConfig& config, Edge /*edge*/)
+    std::unique_ptr<IInputPin> MockBackend::requestInput(const PinConfig& config, Edge /*edge*/)
     {
         log.debug("requesting input " + config.chip + ":" + std::to_string(config.line) + " (" +
                   config.consumer + ")");
         return std::make_unique<MockInputPin>(config);
     }
 
-    bool injectMockEdge(InputPin& pin, Level level)
+    bool injectMockEdge(IInputPin& pin, Level level)
     {
         if (auto* mock = dynamic_cast<MockInputPin*>(&pin))
         {

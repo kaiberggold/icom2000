@@ -34,7 +34,7 @@ class StatusLed {
 public:
     // `pin` is expected to be wired active-high (LED lights when driven
     // High) -- flip on()/off() if your board wires it active-low.
-    explicit StatusLed(std::unique_ptr<gpio::OutputPin> pin);
+    explicit StatusLed(std::unique_ptr<gpio::IOutputPin> pin);
     ~StatusLed();
 
     StatusLed(const StatusLed&) = delete;
@@ -58,7 +58,7 @@ public:
 private:
     void blinkStep(); // runs only on blinkLoop_'s own thread
 
-    std::unique_ptr<gpio::OutputPin> pin_;
+    std::unique_ptr<gpio::IOutputPin> pin_;
     std::atomic<bool> on_ = false;
 
     // Set by blinkNTimes() (on the loop's own thread, per that method's

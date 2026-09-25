@@ -12,7 +12,7 @@ namespace icom::hw
         core::Logger& log = core::getLogger("hw.status_led");
     } // namespace
 
-    StatusLed::StatusLed(std::unique_ptr<gpio::OutputPin> pin) : pin_(std::move(pin))
+    StatusLed::StatusLed(std::unique_ptr<gpio::IOutputPin> pin) : pin_(std::move(pin))
     {
         pin_->write(gpio::Level::LOW);
     }

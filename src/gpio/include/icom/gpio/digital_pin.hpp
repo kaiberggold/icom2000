@@ -24,9 +24,9 @@ struct PinConfig {
 };
 
 // A GPIO line driven by this process.
-class OutputPin {
+class IOutputPin {
 public:
-    virtual ~OutputPin() = default;
+    virtual ~IOutputPin() = default;
 
     virtual void write(Level level) = 0;
 
@@ -36,14 +36,14 @@ public:
 };
 
 // A GPIO line this process only reads, with optional edge notification.
-class InputPin {
+class IInputPin {
 public:
     // `at` is when the kernel observed the edge (CLOCK_MONOTONIC), not when
     // this callback happens to run -- useful for pulse-dial timing where the
     // delay through the reactor should not be counted.
     using EdgeCallback = std::function<void(Level level, std::chrono::steady_clock::time_point at)>;
 
-    virtual ~InputPin() = default;
+    virtual ~IInputPin() = default;
 
     virtual Level read() const = 0;
 
@@ -63,16 +63,16 @@ public:
 // Keeping this as an interface -- rather than having BellController etc.
 // call libgpiod directly -- is what lets the whole daemon build and run its
 // unit tests on a dev host with no GPIO chip at all.
-class Backend {
+class IBackend {
 public:
-    virtual ~Backend() = default;
+    virtual ~IBackend() = default;
 
-    virtual std::unique_ptr<OutputPin> requestOutput(const PinConfig& config, Level initial) = 0;
-    virtual std::unique_ptr<InputPin> requestInput(const PinConfig& config, Edge edge) = 0;
+    virtual std::unique_ptr<IOutputPin> requestOutput(const PinConfig& config, Level initial) = 0;
+    virtual std::unique_ptr<IInputPin> requestInput(const PinConfig& config, Edge edge) = 0;
 };
 
 // Returns the backend selected at compile time (ICOM_WITH_LIBGPIOD): the
 // real libgpiod backend on-target, or an in-memory mock for host dev/tests.
-std::unique_ptr<Backend> makeDefaultBackend();
+std::unique_ptr<IBackend> makeDefaultBackend();
 
 } // namespace icom::gpio

@@ -28,15 +28,16 @@ src/core/   EventLoop (reactor) + LoopThread (an EventLoop on its own
             knowledge at all.
 src/config/ File (INI-style reader) + StationRegistry -- see
             "Configuration" below. No hardware knowledge either.
-src/gpio/   OutputPin/InputPin/Backend interfaces, plus two
+src/gpio/   IOutputPin/IInputPin/IBackend interfaces, plus two
             implementations: MockBackend (in-process, for host dev/tests)
             and GpiodBackend (libgpiod, for target hardware).
 src/hw/     Domain logic built only on the gpio interfaces: Pwm (software
             PWM, see "Software PWM" below) + BellController built on it,
             StatusLed, and Tcm1171Controller (the stateful, event-driven
             example).
-src/audio/  Engine interface + a no-op NullEngine. Real ALSA
-            code is a later pass -- see "Audio boundary" below.
+src/audio/  IEngine interface, a no-op NullEngine (what the daemon
+            runs today), and a first ALSA engine not yet wired in -- see
+            "Audio boundary" below.
 src/ipc/    The Unix-socket control protocol and its server.
 src/app/    daemon_main.cpp -- the composition root. Everything above is
             constructed and wired together here; nothing else in the tree
@@ -111,7 +112,7 @@ This reactor model is a deliberate fit for a Pi Zero: one ARM1176JZF-S
 core at ~1GHz has nothing to gain from a thread *pool* for this workload.
 It's mostly single-threaded too, in the sense that matters: everything in
 `src/core`, `src/gpio`, `src/hw`, and `src/ipc` that talks to the *main*
-loop still needs no locking there, and a future real `Engine` still won't
+loop still needs no locking there, and a future real `IEngine` still won't
 share the reactor thread either (see "Audio boundary" below). The one
 deliberate exception is the second thread "Software PWM" introduces --
 narrowly scoped (one more `EventLoop`, plus whatever needs to schedule
@@ -142,21 +143,55 @@ work onto it from the main thread), not a general invitation to reach for
 ## Logging
 
 `icom::core::Logger` (`src/core/include/icom/core/logger.hpp`) is a named,
-independently-leveled logger -- roughly one per module -- writing through
-`syslog(3)`. Under systemd that lands in the journal exactly like any other
-well-behaved daemon's log output (`journalctl -u intercomd`, or filter by
-identifier with `journalctl -t icom2000`); on a plain Raspberry Pi OS
-install without a separate rsyslog it's journald providing `/dev/log`
-either way, so there's nothing extra to set up.
+independently-leveled logger -- roughly one per module -- writing straight
+to the systemd journal in its native protocol, not `syslog(3)`.
+`journalctl -u intercomd` shows everything; `journalctl -t
+icom2000` filters by the process-wide identifier `initJournal()` sets in
+`main()`; `journalctl ICOM_COMPONENT=hw.bell` filters to just one
+component's lines, via a custom journal field every `log()` call attaches
+(see "Per-component levels" below for the component names) -- this is the
+"tag" that `syslog(3)`'s plain-text messages can't offer, and the reason
+this module uses the journal API directly rather than going through
+syslog.
+
+This is a deliberate, accepted portability tradeoff: logging only works
+under systemd. That costs nothing here -- the sole deployment target,
+Raspberry Pi OS, is itself systemd-based -- and it's a strictly stronger
+guarantee than the `syslog(3)` version this replaced, which merely assumed
+*something* was listening on `/dev/log` (journald, in practice, on every
+install this project targets anyway).
+
+### The journal protocol, without libsystemd
+
+`libsystemd`'s `sd_journal_send()` would do the same job, but it would make
+`libsystemd` a build dependency, and the self-built ARMv6 cross toolchain
+(docs/CROSS_COMPILE.md) has no Raspberry Pi OS libraries to link it
+against without a whole Pi sysroot. What it puts on the wire is simple and
+documented (https://systemd.io/JOURNAL_NATIVE_PROTOCOL/), so
+`icom/core/journal.hpp` does that directly instead: one `AF_UNIX` datagram
+to `/run/systemd/journal/socket` per entry, each field `NAME=value\n`, or
+-- for a value containing a newline -- `NAME\n`, the value's length as a
+64-bit little-endian integer, then the raw value and `\n`. Every entry
+carries `MESSAGE=[component] text`, `PRIORITY`, `SYSLOG_IDENTIFIER`,
+`SYSLOG_FACILITY` and `ICOM_COMPONENT`.
+
+Two deliberate differences from `sd_journal_send()`: the send is
+non-blocking (`MSG_DONTWAIT`), so if journald is backed up an entry is
+dropped rather than stalling the caller -- which matters once the audio
+thread logs an underrun -- and an entry too big for one datagram is
+dropped too, where libsystemd would fall back to passing a memfd. Log
+lines here are far below that limit.
 
 (This module started from a request to log "to the kernel log" --
-`/dev/kmsg`/`dmesg`. That's a real, different thing from syslog: writing
-`/dev/kmsg` requires `CAP_SYSLOG` or root and shows up in `dmesg` whether
-or not a syslog daemon is even running, whereas `syslog(3)` needs no
-special privilege but requires something listening on `/dev/log`. This
-project uses `syslog(3)` -- it's the conventional destination for a
-userspace daemon's own logs, works with the unprivileged systemd unit this
-project already ships, and every message still ends up in the journal.)
+`/dev/kmsg`/`dmesg`. That's a real, different thing: writing `/dev/kmsg`
+requires `CAP_SYSLOG` or root and shows up in `dmesg` whether or not a log
+daemon is even running, whereas both `syslog(3)` and the journal socket
+need no special privilege but require something listening on the other
+end. This project logs to the journal -- it's the conventional destination
+for a userspace daemon's own logs under systemd, works with the
+unprivileged systemd unit this project already ships, and unlocks
+per-entry structured fields `/dev/kmsg` and plain `syslog(3)` text both
+lack.)
 
 ### Per-component levels
 
@@ -174,7 +209,8 @@ where I want": add a `log` line if the file doesn't have one yet
 (matching the dotted `module.submodule` naming already in use -- see any
 existing `.cpp` under `src/` for the pattern), then log. Current
 components: `core.event_loop`, `gpio.mock`, `gpio.gpiod`, `hw.bell`,
-`hw.tcm1171`, `audio`, `ipc.control_server`, `app`.
+`hw.pwm`, `hw.status_led`, `hw.tcm1171`, `audio`, `audio.alsa`,
+`ipc.control_server`, `app`.
 
 Levels are set at startup, per component, via the `ICOM_LOG` environment
 variable or `intercomd --log-level`, both parsed by the same
@@ -197,12 +233,12 @@ levels components happened to default to.
 ### Seeing log output while debugging
 
 `--log-console` (`icom::core::setConsoleOutput(true)`) mirrors every
-logged message to stderr, in addition to syslog, at whatever level(s)
+logged message to stderr, in addition to the journal, at whatever level(s)
 `--log-level`/`ICOM_LOG` already set -- off by default, since a
 systemd-managed run has nothing to gain from it (stderr just lands in the
 journal a second time). It exists for interactive/debugger use, where
-waiting on a second `journalctl -f`/fake-`/dev/log` window is friction a
-plain `std::cerr` line doesn't have: the "Debug intercomd" and "Debug
+waiting on a second `journalctl -f` window is friction a plain `std::cerr`
+line doesn't have: the "Debug intercomd" and "Debug
 intercomd on Pi Zero" `.vscode/launch.json` configs both pass it, and with
 `"externalConsole": false` (already set), VS Code's cppdbg captures that
 stderr straight into the Debug Console. The remote-gdbserver config is the
@@ -229,17 +265,20 @@ matter which TU that first use comes from.
 
 `tests/logger_tests.cpp` covers the registry (identity, per-component
 levels) and `configureLevels()`'s parsing, including that a rejected spec
-changes nothing. It does not check that a message actually reaches
-`syslog` -- that was instead verified manually against this exact build,
-by standing up a throwaway `AF_UNIX SOCK_DGRAM` listener at `/dev/log` and
-running `intercomd` against it (there's no standing fake-syslog fixture in
-the repo; it isn't worth automating a Unix-socket receiver for one
-integration check when the actual `syslog(3)` call is standard,
-decades-stable POSIX API).
+changes nothing -- plus the journal writer: both field encodings, that
+`sendJournalEntry()` delivers exactly the encoded bytes to a socket the
+test binds itself, and that a missing socket fails without blocking.
+
+That real journald accepts the encoding isn't in the suite (it needs a
+running `systemd-journald`), so it was checked by hand: with a
+`systemd-journald` running, `intercomd`'s entries came back through
+`journalctl ICOM_COMPONENT=hw.pwm` and `journalctl -t icom2000` with every
+field intact, and a message containing a newline and a tab came back
+byte-for-byte through the binary-length encoding.
 
 ## GPIO abstraction
 
-`icom::gpio::OutputPin` / `InputPin` / `Backend`
+`icom::gpio::IOutputPin` / `IInputPin` / `IBackend`
 (`src/gpio/include/icom/gpio/digital_pin.hpp`) are the only thing
 `src/hw` and `src/app` are allowed to depend on for GPIO access -- neither
 includes `<gpiod.hpp>` or knows libgpiod exists. Two backends implement
@@ -262,7 +301,7 @@ that interface:
   called `gpiod::line_request::get_value()`, which isn't `const` in the
   actual API, from a `const` member function -- `request_` is now
   `mutable`, since reading a pin's value is logically const from
-  `InputPin::read()`'s perspective regardless of that binding's own
+  `IInputPin::read()`'s perspective regardless of that binding's own
   constness. **Not yet verified on real hardware** -- the toolchain used
   to compile-test it cannot itself produce valid ARMv6 output (see
   docs/CROSS_COMPILE.md's "Read this first"), so this confirms the code
@@ -279,7 +318,7 @@ libgpiod headers to exist.
 - **`BellController`** (`src/hw`) drives the bell via software PWM
   (`Pwm`, see "Software PWM" below) rather than a plain digital on/off --
   `ring()`/`silence()`/`ringFor(duration, loop)` are the same simple API
-  as before (this used to just wrap one `OutputPin`), they now move the
+  as before (this used to just wrap one `IOutputPin`), they now move the
   PWM's duty time between a configured "ring" value and zero instead of
   writing the pin directly. Read this one first, then Pwm's own header
   for why a relay/buzzer wants PWM instead of a flat digital drive.
@@ -393,12 +432,56 @@ hardware:
 
 ## Audio boundary
 
-Out of scope for this pass by design. `icom::audio::Engine`
-(`src/audio/include/icom/audio/audio_engine.hpp`) defines the seam a real
-implementation plugs into; `NullEngine` satisfies it today so the
-daemon builds, runs, and reports `audio=down`... `audio=up`-but-silent
-honestly via `intercomctl status` without every other component needing
-to special-case "audio doesn't exist yet".
+`icom::audio::IEngine` (`src/audio/include/icom/audio/audio_engine.hpp`)
+defines the seam a real implementation plugs into; `NullEngine` is what
+the daemon runs today, so it builds, runs, and reports `audio=down`...
+`audio=up`-but-silent honestly via `intercomctl status` without every
+other component needing to special-case "audio doesn't exist yet".
+
+### ALSA engine (step 1 of 3)
+
+`makeAlsaEngine(captureFrom, playbackTo)`
+(`src/audio/src/alsa_audio_engine.cpp`) is the first real
+implementation, deliberately narrow: **one** mono route, 48 kHz S16_LE,
+capturing from one station's named capture device and writing each
+period straight out to another station's named playback device, on its
+own `std::jthread`. It proves the ALSA plumbing in isolation --
+open/configure via `snd_pcm_set_params()` (the `plug` layer in
+`config/asound.conf` handles any rate/format conversion the codec needs),
+playback primed with one period short of a full buffer of silence
+(~40 ms of slack before an underrun, and roughly the route's latency),
+and overrun/underrun/suspend recovery via `snd_pcm_recover()`. `start()`
+never throws on a device problem: it logs why and leaves `isRunning()`
+false, and so does an unrecoverable error on the audio thread later --
+audio failing shouldn't take the bell down with it.
+
+**Not yet wired into the daemon**: `daemon_main.cpp` still runs
+`makeNullEngine()`. The remaining steps:
+
+2. Both stations at once, a lock-free queue to the reactor thread, and
+   real-time scheduling for the audio thread(s). Blocked on
+   `config/asound.conf` first: all four named devices are `plug` aliases
+   onto the one `hw:Zero`, and a raw `hw` device only allows one capture
+   stream open at a time -- a second station's capture needs `dsnoop`
+   (and shared playback `dmix`) there, which that file's own caveats say
+   to verify on real hardware first.
+3. Swap it in as the daemon's engine and test against a real Pi Zero +
+   Codec Zero. **Open design question for this step**: `config/asound.conf`
+   currently says the live door/inside audio runs entirely inside the
+   DA7212 codec's own analog crossbar (set once at boot by alsactl), with
+   these PCM devices reserved for intercomd's own sounds. A digital
+   door->inside route on top of that would double the audio, so step 3
+   has to pick one path for live audio, not run both.
+
+Tested without a sound card by `tests/alsa_engine_tests.cpp`: it points
+`HOME` at a scratch `.asoundrc` defining test PCMs on alsa-lib's own
+`file` plugin over its `null` device. Capture reads a known sample
+pattern from a FIFO -- not a regular file, because `null` isn't paced in
+real time and the engine would otherwise spin at hundreds of MB/s; over
+a FIFO it consumes exactly what the test wrote and then blocks -- and the
+test checks the pattern arrives in the playback file bit-exact, with no
+dropped, repeated, or reordered samples (confirmed to catch a deliberately
+duplicated period and a deliberately dropped sample per period).
 
 When it's implemented, it should **not** join the reactor thread. Two mono
 ALSA duplex streams against the Codec Zero (handset audio, and
@@ -455,7 +538,7 @@ is the **one place** a station name is tied to a physical/logical audio
 channel: `config/icom2000.conf`'s `[stations]` (the name list) and
 `[station.<name>]` (that station's named capture/playback devices,
 defined in `config/asound.conf`) sections. Everything else -- today, just
-the `Engine` factory; later, whatever actually streams audio --
+the `IEngine` factory; later, whatever actually streams audio --
 refers to stations as `"door"`/`"inside"` and nothing else. No code
 anywhere works with "left"/"right" or a channel index; there wouldn't
 even be a natural place to put that, since a `Station` only exposes
@@ -585,15 +668,15 @@ third-party framework (Catch2/doctest/GTest) via `FetchContent`, so
 is a ~20-line `CHECK()` macro. Swapping in a real framework later is a
 one-file change once the suite outgrows that.
 
-Six `ctest` cases: `icom_tests` covers `MockBackend` output/input
+Seven `ctest` cases: `icom_tests` covers `MockBackend` output/input
 behavior, that an injected mock edge reaches an `EventLoop` callback
 end-to-end (the same path `Tcm1171Controller` depends on in production),
 `EventLoop::post()`, and `LoopThread` (confirming a posted callback
 genuinely runs on its background thread, not just eventually). Threaded
 tests there use a real background thread rather than faking one, since
 `post()`'s whole point is being safe to call across real threads.
-`icom_logger_tests` covers the logging registry and `configureLevels()`
-parsing (see "Logging" above). `icom_config_tests` covers `File` parsing
+`icom_logger_tests` covers the logging registry, `configureLevels()`
+parsing, and the journal protocol writer (see "Logging" above). `icom_config_tests` covers `File` parsing
 (including the missing-vs-malformed-file distinction) and
 `StationRegistry`'s defaults/overrides (see "Configuration" above).
 `icom_hw_tests` covers `StatusLed` -- on/off state tracking, and
@@ -602,6 +685,9 @@ just realism: see "Software PWM" for why `~StatusLed()` requires an
 actively-running loop). `icom_pwm_tests` covers `Pwm` the same way:
 construction/`setDutyTime()` clamping, and that 0%/100%/partial duty
 actually produce the expected pin behavior over a real background loop.
+`icom_audio_tests` covers the ALSA engine with no sound card, via
+file-backed test PCMs: bad device names leave it stopped, and a known
+sample pattern arrives bit-exact at playback (see "Audio boundary").
 `architecture_invariants` just runs
 `scripts/check_architecture_invariants.sh` (see "Architecture
 invariants"). `GpiodBackend` isn't in this `ctest` suite (host-dev builds
@@ -620,9 +706,9 @@ Roughly in the order it'd need doing to become a real intercom:
    assignments"); fix polarity/line numbers.
 2. Pulse-dial decoding off the same hook-detect edges
    `Tcm1171Controller` already timestamps.
-3. A real `Engine` against the Codec Zero (ALSA duplex, its own
-   thread(s), a ring/tone generator for the TCM1171's ring cadence),
-   opening the named devices `StationRegistry` already hands it.
+3. Finish the ALSA `IEngine` (step 1 of 3 done -- see "Audio boundary"
+   for steps 2 and 3), plus a ring/tone generator for the TCM1171's ring
+   cadence.
 4. Verified per-channel routing in `config/asound.conf` (currently plain
    1:1 aliases -- see that file's caveats) once there's real hardware to
    check `route`/channel indices against.

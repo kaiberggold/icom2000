@@ -36,7 +36,7 @@ public:
     // `pin` is driven High for `dutyTime` (initially zero -- silent until
     // setDutyTime() says otherwise) out of every `period`. `loop` must
     // outlive this object.
-    Pwm(std::unique_ptr<gpio::OutputPin> pin, core::EventLoop& loop,
+    Pwm(std::unique_ptr<gpio::IOutputPin> pin, core::EventLoop& loop,
         std::chrono::milliseconds period = std::chrono::milliseconds(10));
     ~Pwm();
 
@@ -62,7 +62,7 @@ private:
     // mid-period must not shorten/stretch the period already in flight.
     void turnOffMidPeriod(std::chrono::milliseconds dutyThisPeriod);
 
-    std::unique_ptr<gpio::OutputPin> pin_;
+    std::unique_ptr<gpio::IOutputPin> pin_;
     core::EventLoop& loop_;
     std::chrono::milliseconds period_;
     std::atomic<std::chrono::milliseconds> dutyTime_;

@@ -48,8 +48,14 @@ This gets you, all driven from inside VS Code:
 
 ```sh
 sudo apt update
-sudo apt install build-essential cmake ninja-build gdb-multiarch openssh-client git astyle
+sudo apt install build-essential cmake ninja-build gdb-multiarch openssh-client git astyle \
+    libasound2-dev meson autoconf automake libtool
 ```
+
+`libasound2-dev` is for the `host-dev` build. `meson`, `autoconf`,
+`automake` and `libtool` are for the `pi0-*` builds, which compile
+libgpiod and alsa-lib from source for the Pi (see
+`docs/CROSS_COMPILE.md`).
 
 `astyle` is a separate concern from everything else here: it's what
 `.vscode/settings.json`'s format-on-save actually shells out to (via the
@@ -103,16 +109,21 @@ cmake --build --preset host-dev
 ctest --preset host-dev --output-on-failure
 ```
 
-`pi0-release`/`pi0-debug` need `ICOM_PI_SYSROOT` pointed at wherever you
-put the sysroot from `docs/CROSS_COMPILE.md`:
+`pi0-release`/`pi0-debug` need the ARMv6 cross toolchain from
+`docs/CROSS_COMPILE.md` on your `PATH`, but no Raspberry Pi sysroot --
+libgpiod and alsa-lib are built from source as part of the build:
 
 ```sh
-cmake --preset pi0-release -DICOM_PI_SYSROOT=$HOME/pi-sysroot
-cmake --preset pi0-debug   -DICOM_PI_SYSROOT=$HOME/pi-sysroot
+cmake --preset pi0-release
+cmake --preset pi0-debug
 ```
 
-You only need to *configure* each preset once (the cache variable sticks);
-after that, building is just `cmake --build --preset <name>` or the
+(Installing a `-dev` package in WSL never satisfies these presets: their
+toolchain file points pkg-config only at the Pi side, so a `Package '...'
+not found` from a `pi0-*` configure isn't fixed by `apt install`.)
+
+You only need to *configure* each preset once; after that, building is
+just `cmake --build --preset <name>` or the
 matching task/CMake Tools button. `pi0-debug` is identical to
 `pi0-release` except `-O0 -g` instead of `-O2 -g` -- use it when you're
 about to attach a debugger and optimized code's variable/step behavior is

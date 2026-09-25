@@ -1,5 +1,6 @@
 add_library(icom_core STATIC
     src/logger.cpp
+    src/journal.cpp
     src/event_loop.cpp
     src/signal_watcher.cpp
     src/loop_thread.cpp

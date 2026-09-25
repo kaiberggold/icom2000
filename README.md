@@ -14,14 +14,15 @@ placeholder, and why the code is shaped the way it is.
 - CMake >= 3.25, Ninja
 - A C++20 compiler (GCC 12+ on target -- Raspberry Pi OS Bookworm; any
   reasonably recent GCC/Clang on your dev host)
-- Host dev/test build: nothing else -- GPIO is mocked in-process.
+- Host dev/test build: `libasound2-dev` (ALSA) -- GPIO is mocked
+  in-process.
 - Target build: an ARMv6-**capable** cross toolchain (**not** a generic
   Debian/Ubuntu `gcc-arm-linux-gnueabihf` -- confirmed, not just
   suspected, to silently produce ARMv7 binaries regardless of flags; see
   [`docs/CROSS_COMPILE.md`](docs/CROSS_COMPILE.md), checked automatically
-  at configure time), plus `meson` and `ninja` on the host (libgpiod
-  cross-builds from source as part of the build -- no prebuilt armv6
-  libgpiod exists anywhere to install instead).
+  at configure time), plus `meson`, `ninja`, `autoconf`, `automake` and
+  `libtool` on the host (libgpiod and alsa-lib cross-build from source as
+  part of the build -- no Raspberry Pi sysroot needed).
 
 ## Build & test (dev host, mock GPIO)
 
@@ -39,9 +40,10 @@ Run it locally:
 ./build/host-dev/src/cli/intercomctl -s /tmp/icom2000.sock bell ring 300
 ```
 
-Logs go to syslog (`journalctl -t icom2000` under systemd), per component
-and level-filterable: `intercomd --log-level "warn,gpio.mock=debug"` or the
-equivalent `ICOM_LOG` environment variable -- see
+Logs go straight to the systemd journal (`journalctl -t icom2000`, or
+`journalctl ICOM_COMPONENT=gpio.mock` to filter to one component), per
+component and level-filterable: `intercomd --log-level "warn,gpio.mock=debug"`
+or the equivalent `ICOM_LOG` environment variable -- see
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) "Logging".
 
 Runtime config (GPIO lines, the station name -> ALSA device mapping) comes
@@ -84,9 +86,9 @@ setup and how the remote-debug flow works.
 ```
 src/core/   reactor (EventLoop) + LoopThread, signal handling, logging
 src/config/ File (INI-style config reader), StationRegistry
-src/gpio/   OutputPin/InputPin interfaces + mock and libgpiod backends
+src/gpio/   IOutputPin/IInputPin interfaces + mock and libgpiod backends
 src/hw/     Pwm (software PWM), BellController, StatusLed, Tcm1171Controller
-src/audio/  Engine interface (stubbed -- see docs/ARCHITECTURE.md)
+src/audio/  IEngine interface, no-op engine, first ALSA engine (not wired in yet)
 src/ipc/    Unix-socket control protocol + server
 src/app/    intercomd (composition root)
 src/cli/    intercomctl

@@ -34,9 +34,9 @@ const char* toString(LineState state);
 class Tcm1171Controller {
 public:
     struct Pins {
-        std::unique_ptr<gpio::OutputPin> ringMode;    // RM: enable ring generation on the line
-        std::unique_ptr<gpio::OutputPin> polarity;     // FR: forward/reverse line polarity
-        std::unique_ptr<gpio::InputPin> hookDetect;   // external loop-current comparator output
+        std::unique_ptr<gpio::IOutputPin> ringMode;    // RM: enable ring generation on the line
+        std::unique_ptr<gpio::IOutputPin> polarity;     // FR: forward/reverse line polarity
+        std::unique_ptr<gpio::IInputPin> hookDetect;   // external loop-current comparator output
     };
 
     using StateChangeCallback = std::function<void(LineState previous, LineState current)>;
