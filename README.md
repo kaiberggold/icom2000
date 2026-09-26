@@ -73,6 +73,10 @@ one piece that isn't tracked here, the alsactl state file itself). After
 that, `scripts/deploy.sh user@pi-hostname` copies just the binaries over
 and restarts `intercomd` for every subsequent update.
 
+Bringing up the audio hardware: [`docs/SMOKE_TESTS.md`](docs/SMOKE_TESTS.md)
+walks through speaker, microphone and mixer checks with the standard ALSA
+tools.
+
 ## VS Code (Windows + WSL2)
 
 The repo ships a `.vscode/` setup (CMake Tools presets, build tasks, and
@@ -93,7 +97,7 @@ src/ipc/    Unix-socket control protocol + server
 src/app/    intercomd (composition root)
 src/cli/    intercomctl
 tests/      host-only unit tests + the architecture-invariants guard script
-docs/       architecture, cross-compile, and VS Code/WSL2 setup notes
+docs/       architecture, cross-compile, VS Code/WSL2 setup, audio smoke tests
 config/     icom2000.conf, asound.conf (see config/README.md)
 systemd/    intercomd.service, alsa-restore-codec-zero.service
 udev/       GPIO group-permission rule
