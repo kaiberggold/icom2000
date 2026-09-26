@@ -166,6 +166,8 @@ int main(int argc, char** argv) {
     unsigned polarityLine = 22;
     unsigned hookDetectLine = 6;
     unsigned statusLedLine = 23; // Codec Zero's own green status LED
+    unsigned statusLedBlinkOnMs = 50;
+    unsigned statusLedBlinkOffMs = 50;
     // The bell is driven via software PWM (icom::hw::Pwm), not a plain
     // digital on/off -- see docs/ARCHITECTURE.md "Software PWM". Default
     // duty == period (100%) reproduces the old plain-on/off behavior
@@ -181,8 +183,10 @@ int main(int argc, char** argv) {
         polarityLine = config.getUint("gpio.tcm1171", "polarity_line", polarityLine);
         hookDetectLine = config.getUint("gpio.tcm1171", "hook_detect_line", hookDetectLine);
         statusLedLine = config.getUint("gpio.status_led", "line", statusLedLine);
+        statusLedBlinkOnMs = config.getUint("gpio.status_led", "blink_on_ms", statusLedBlinkOnMs);
+        statusLedBlinkOffMs = config.getUint("gpio.status_led", "blink_off_ms", statusLedBlinkOffMs);
     } catch (const std::exception& e) {
-        std::cerr << "intercomd: " << opts.configPath << ": invalid GPIO line number (" << e.what()
+        std::cerr << "intercomd: " << opts.configPath << ": invalid [gpio.*] value (" << e.what()
                   << ")\n";
         return 1;
     }
@@ -298,8 +302,9 @@ int main(int argc, char** argv) {
     // the only backgroundLoop.loop() operation safe to call from here
     // (the main thread), so the actual blinkNTimes() call has to happen
     // inside the posted lambda, on that loop's own thread.
-    backgroundLoop.loop().post([&statusLed, &backgroundLoop] {
-        statusLed.blinkNTimes(3, backgroundLoop.loop(), 50ms, 50ms);
+    backgroundLoop.loop().post([&statusLed, &backgroundLoop, statusLedBlinkOnMs, statusLedBlinkOffMs] {
+        statusLed.blinkNTimes(3, backgroundLoop.loop(), std::chrono::milliseconds(statusLedBlinkOnMs),
+                              std::chrono::milliseconds(statusLedBlinkOffMs));
     });
 
     log.info("ready");

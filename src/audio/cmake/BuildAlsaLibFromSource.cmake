@@ -67,6 +67,11 @@ function(icom_build_alsa_lib_from_source)
         GIT_REPOSITORY "${ICOM_ALSA_LIB_GIT_URL}"
         GIT_TAG "${ICOM_ALSA_LIB_GIT_TAG}"
         GIT_SHALLOW TRUE
+        # Without this, the git update step runs on every build and drags
+        # autoreconf, configure, make and install along with it (~10 s, plus
+        # a relink of everything using libasound). A pinned tag never needs
+        # updating; changing ICOM_ALSA_LIB_GIT_TAG still re-fetches.
+        UPDATE_DISCONNECTED TRUE
         PREFIX "${_icom_alsa_root}"
         INSTALL_DIR "${_icom_alsa_stage}"
         CONFIGURE_COMMAND
