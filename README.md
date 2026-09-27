@@ -101,7 +101,7 @@ docs/       architecture, cross-compile, VS Code/WSL2 setup, audio smoke tests
 config/     icom2000.conf, asound.conf (see config/README.md)
 systemd/    intercomd.service, alsa-restore-codec-zero.service
 udev/       GPIO group-permission rule
-scripts/    deploy.sh, check_architecture_invariants.sh
+scripts/    deploy.sh, check_architecture_invariants.sh, codec-zero-mixer.sh
 .vscode/    CMake presets wiring, build tasks, F5 debug configs (host + remote gdbserver)
 ```
 

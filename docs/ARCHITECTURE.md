@@ -610,7 +610,7 @@ just a convention, it's checked on every `ctest` run.
 Mixer state (which connector feeds which capture channel and which
 playback channel drives which output -- door on the left, inside on the
 right -- with the codec's own analog mic-to-output paths off, plus levels
-and switches; the exact `amixer` commands are in docs/SMOKE_TESTS.md "S2")
+and switches; `scripts/codec-zero-mixer.sh` sets it up, see docs/SMOKE_TESTS.md "S2")
 is set exactly once, at boot, by
 `systemd/alsa-restore-codec-zero.service` running
 `alsactl restore -f /etc/codec-zero-intercom.state` -- see that unit's
