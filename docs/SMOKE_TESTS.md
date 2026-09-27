@@ -34,10 +34,14 @@ settings:
 
 ```sh
 git clone https://github.com/raspberrypi/Pi-Codec.git
-ls Pi-Codec    # pick the Codec Zero "...SPK_playback" or "Playback_only" file
+ls Pi-Codec    # pick the Codec Zero file for onboard mic + speaker, named
+               # like Codec_Zero_OnboardMIC_record_and_SPK_playback.state
 sudo alsactl restore -f Pi-Codec/<that file>.state
 amixer -c Zero contents | grep -iA2 spk     # speaker switch on, volume sane
 ```
+
+The onboard-mic-plus-speaker file is the one to use while no external mic
+is wired up: tests 4 and 5 record from the board's own microphone.
 
 **Pass:** the speaker controls read as unmuted.
 
@@ -66,18 +70,29 @@ speaker-test -D icom_door_playback   -c 1 -t sine -f 440 -l 2
 
 ## 4. Microphone records
 
+With no external mic connected, record from the Codec Zero's onboard mic
+(`icom_onboard_mic_capture` in `config/asound.conf`; needs the onboard-mic
+mixer state from test 1):
+
 ```sh
-arecord -D icom_door_capture -f S16_LE -r 48000 -c 1 -d 5 -V mono /tmp/mic.wav   # speak; the VU meter moves
+arecord -D icom_onboard_mic_capture -f S16_LE -r 48000 -c 1 -d 5 -V mono /tmp/mic.wav   # speak; the VU meter moves
 aplay -D icom_inside_playback /tmp/mic.wav
 ```
 
 **Pass:** you hear yourself. This is the format our ALSA engine asks for:
-48 kHz, mono, 16-bit.
+48 kHz, mono, 16-bit. Once an external mic is wired up, repeat with
+`icom_door_capture` and the matching mixer state.
+
+To make a station use the onboard mic -- so `intercomd` logs it at
+startup, and the audio engine will pick it up once it's wired in --
+uncomment `capture_device = icom_onboard_mic_capture` in that station's
+section of `/etc/icom2000.conf`. One station at a time: two capture
+devices can't be open at once (test 6).
 
 ## 5. Capture and playback at the same time, without our code
 
 ```sh
-arecord -D icom_door_capture -f S16_LE -r 48000 -c 1 | aplay -D icom_inside_playback -f S16_LE -r 48000 -c 1
+arecord -D icom_onboard_mic_capture -f S16_LE -r 48000 -c 1 | aplay -D icom_inside_playback -f S16_LE -r 48000 -c 1
 ```
 
 Keep the volume low: the onboard mic next to the speaker will feedback,

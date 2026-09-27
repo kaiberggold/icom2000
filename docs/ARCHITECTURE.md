@@ -553,11 +553,19 @@ named PCM device in `config/asound.conf`. Nothing that refers to stations
 by name needs to change, because nothing ever encoded an assumption about
 *how many* stations there are or *what* backs each one.
 
+The same mechanism covers testing without the real microphones: the
+shipped `config/icom2000.conf` has a commented-out
+`capture_device = icom_onboard_mic_capture` override in each station's
+section, taking that station's input from the Codec Zero's onboard mic
+instead (one station at a time; the mixer state has to route that mic,
+see `config/asound.conf`).
+
 ### Named ALSA devices
 
 `config/asound.conf` (installed as `/etc/asound.conf`) defines the PCM
 devices every `Station` names: `icom_door_capture`,
-`icom_door_playback`, `icom_inside_capture`, `icom_inside_playback`. Today
+`icom_door_playback`, `icom_inside_capture`, `icom_inside_playback`, plus
+`icom_onboard_mic_capture` for testing with the board's own mic. Today
 they're plain 1:1 aliases onto the one physical card (the file has the
 full rationale and caveats) -- what matters architecturally is that this
 is the *only* place a sound-card device string exists at all.
