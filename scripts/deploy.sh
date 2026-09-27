@@ -2,7 +2,7 @@
 # Copies the cross-built binaries to a Pi Zero and restarts the service.
 # Assumes: `cmake --build --preset pi0-release` already ran, and the target
 # already has systemd/intercomd.service installed & enabled, and
-# udev/99-icom2000-gpio.rules installed (see docs/ARCHITECTURE.md
+# udev/99-icom2000-gpio.rules installed (see docs/CROSS_COMPILE.md
 # "Deploying"). This script only pushes the binaries and bounces the unit.
 set -euo pipefail
 

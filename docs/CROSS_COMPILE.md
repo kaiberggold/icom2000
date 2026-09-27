@@ -386,3 +386,7 @@ Once a `pi0-release` build exists, `scripts/deploy.sh` copies
 systemd unit -- see that script's header comment for prerequisites
 (`systemd/intercomd.service` and `udev/99-icom2000-gpio.rules` already
 installed on the target).
+
+Not needed while you run `intercomd` from the VS Code debugger instead
+(docs/VSCODE_WSL2_SETUP.md): then the Pi only needs the audio config --
+see "Setup on the Pi" in docs/SMOKE_TESTS.md.

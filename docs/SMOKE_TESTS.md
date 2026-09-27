@@ -11,6 +11,37 @@ stay running.
 a 4-8 Ω speaker, never connect either speaker terminal to ground (a scope
 ground clip counts), and start at low volume.
 
+## Setup on the Pi
+
+For smoke tests, and for running `intercomd` from the VS Code debugger,
+the Pi needs only the audio config -- not a full deployment. Skip
+`systemd/intercomd.service`, `udev/99-icom2000-gpio.rules` and
+`scripts/deploy.sh` (docs/CROSS_COMPILE.md "Deploying"); they're for
+running `intercomd` as a service.
+
+From the repo checkout on your dev machine:
+
+```sh
+scp config/asound.conf config/icom2000.conf systemd/alsa-restore-codec-zero.service <user>@<pi-host>:
+```
+
+On the Pi:
+
+```sh
+sudo apt install alsa-utils             # aplay/arecord/speaker-test/alsactl; usually preinstalled
+sudo cp asound.conf /etc/asound.conf    # the named devices (icom_*) the tests use
+sudo cp icom2000.conf /etc/icom2000.conf
+groups                                  # should include "audio" and "gpio"
+```
+
+`/etc/icom2000.conf` matters because the debugger starts `intercomd`
+without `--config`, so it reads that path. Edit it there -- e.g. to switch
+a station to the onboard mic (test 4). `alsa-restore-codec-zero.service`
+is only needed for test 7.
+
+The debugger runs `intercomd` as your SSH user, so that user needs the
+`audio` and `gpio` groups. Raspberry Pi OS's default user has both.
+
 ## 0. Card detected
 
 ```sh
@@ -57,10 +88,10 @@ mono, so you hear both "left" and "right".
 
 ## 3. Our named devices work
 
-Checks the card name in `config/asound.conf`:
+Checks the card name in `/etc/asound.conf` (installed in "Setup on the
+Pi"):
 
 ```sh
-sudo cp asound.conf /etc/asound.conf       # config/asound.conf from the repo
 speaker-test -D icom_inside_playback -c 1 -t sine -f 440 -l 2
 speaker-test -D icom_door_playback   -c 1 -t sine -f 440 -l 2
 ```
@@ -117,14 +148,33 @@ capture) and `dmix` (shared playback) in `asound.conf`.
 
 ## 7. Mixer settings survive a reboot
 
+**Optional while smoke testing.** Raspberry Pi OS's own `alsa-utils`
+usually already saves the mixer at shutdown and restores it at boot
+(`systemctl status alsa-restore`). So after test 1, just reboot and rerun
+test 3. If the tone still plays, nothing else is needed for now.
+
+`alsa-restore-codec-zero.service` is the project's own version, for the
+real installation: it restores one fixed, known-good state file at every
+boot, instead of whatever the mixer happened to be at the last shutdown.
+Nothing has to be written -- the unit file is `systemd/alsa-restore-codec-zero.service`
+in the repo, copied to the Pi in "Setup on the Pi". Setting it up:
+
 ```sh
+# 1. Save the working mixer (after tests 1-5 pass) where the unit reads it:
 sudo alsactl store -f /etc/codec-zero-intercom.state
-sudo cp alsa-restore-codec-zero.service /etc/systemd/system/   # systemd/ in the repo
-sudo systemctl enable alsa-restore-codec-zero && sudo reboot
-# after the reboot:
-systemctl status alsa-restore-codec-zero
+# 2. Install and enable the unit:
+sudo cp alsa-restore-codec-zero.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable alsa-restore-codec-zero
+sudo reboot
+# 3. After the reboot:
+systemctl status alsa-restore-codec-zero    # "active (exited)", no errors
 speaker-test -D icom_inside_playback -c 1 -t sine -l 1
 ```
+
+If `/etc/codec-zero-intercom.state` doesn't exist, the unit skips itself
+("condition failed" in its status) rather than failing. After changing the
+mixer later, rerun step 1 to update the file.
 
 **Pass:** the tone plays after the reboot with no manual mixer work.
 
