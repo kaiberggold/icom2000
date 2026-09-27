@@ -99,6 +99,28 @@
             }
         },
 
+        // --- Copy-only tasks, no build and nothing started on the Pi.
+        {
+            // The debug chain's copy step on its own: the current pi0-debug
+            // build as <piDeployDir>/intercomd-debug, plus intercomctl and
+            // icom-audiotest. Build first (cmake-build-pi0-debug).
+            "label": "pi-sync-app",
+            "type": "shell",
+            "command": "${workspaceFolder}/scripts/sync-app.sh",
+            "args": ["${input:piUser}@${input:piHost}", "--dir", "${input:piDeployDir}"],
+            "problemMatcher": []
+        },
+        {
+            // config/icom2000.conf and config/asound.conf -> /etc on the Pi,
+            // old versions kept as /etc/<file>.bak-<timestamp>. May ask for
+            // the Pi's sudo password in the task terminal.
+            "label": "pi-sync-config",
+            "type": "shell",
+            "command": "${workspaceFolder}/scripts/sync-config.sh",
+            "args": ["${input:piUser}@${input:piHost}"],
+            "problemMatcher": []
+        },
+
         // --- Full production deploy (systemd restart), reusing the
         // existing script -- unrelated to the debug flow above.
         {

@@ -11,14 +11,19 @@ from.
 | `asound.conf` | `/etc/asound.conf` | tracked in this repo, edit directly |
 | `codec-zero-intercom.state` | `/etc/codec-zero-intercom.state` | **not in this repo** -- generated on real hardware, see below |
 
+`scripts/sync-config.sh <user>@<pi-host>` (VS Code task `pi-sync-config`)
+installs the first two on a Pi, keeping any older version as
+`/etc/<file>.bak-<timestamp>`.
+
 ## The alsactl state file
 
 `codec-zero-intercom.state` is not shipped here and shouldn't be
 fabricated by hand or by a tool that hasn't seen the actual codec's mixer
 controls -- it's a dump of the DA7212's specific control names and values
-(the crossbar routing between "door" and "inside", levels, switches),
-captured from a live system that already has the mixer configured the way
-you want it (`alsamixer` / `amixer`), via:
+(which connector feeds which channel, levels, switches), captured from a
+live system that already has the mixer configured the way you want it.
+`scripts/codec-zero-mixer.sh` sets up the two-station routing on the Pi
+(docs/SMOKE_TESTS.md "S2"); fine-tune levels with `alsamixer`, then:
 
 ```sh
 sudo alsactl store -f /etc/codec-zero-intercom.state
