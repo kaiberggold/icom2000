@@ -218,17 +218,99 @@ change `format`/`rate` in both shared devices in `asound.conf`.
 
 ### S2. Mixer: each connector on its own channel
 
-Set the mixer (`alsamixer -c Zero`, or `amixer -c Zero`) so that:
+Which connector feeds which channel is set in the codec's mixer. The
+commands below assume this wiring:
 
-- door mic -> ADC left, inside mic -> ADC right;
-- DAC left -> door speaker, DAC right -> inside speaker;
-- the codec's own analog paths from the mics to the outputs are off --
-  `intercomd` carries the audio, so these would play it twice.
+| Station | Mic | Speaker |
+|---|---|---|
+| door (left channel) | MIC jack (`Mic 1`) | speaker terminals (`Lineout`) |
+| inside (right channel) | onboard mic (`Mic 2`) | headphone jack, left side (`Headphone`) |
 
-The exact control names are the DA7212's, so `amixer -c Zero contents` and
-the DA7212 datasheet are the reference; the Pi-Codec state files from test
-1 are a starting point. Save the result as in test 7, so it survives a
-reboot.
+Two things about the Codec Zero decide the output side (from the kernel's
+`da7213` codec driver and Raspberry Pi's `iqaudio-codec` board driver):
+
+- the speaker terminals are driven only by the codec's **right** output
+  mix, so door's left channel is crossed over to the right DAC inside the
+  codec -- the `DAC ... Source MUX` lines;
+- `DAC Mono Switch` must be off: on, it mixes both channels together,
+  which is why a single speaker played both tones in test 3.
+
+Control names and starting levels come from Raspberry Pi's Pi-Codec state
+files (test 1):
+
+```sh
+C="amixer -q -c Zero cset"
+
+# Inputs: door mic (MIC jack) -> left channel, inside mic (onboard) -> right
+$C name='MIC Jack Switch' on
+$C name='Onboard MIC Switch' on
+$C name='AUX Jack Switch' off
+$C name='Mic 1 Switch' on
+$C name='Mic 2 Switch' on
+$C name='Mic 1 Volume' 5
+$C name='Mic 2 Volume' 5
+$C name='Mic 1 Amp Source MUX' Differential
+$C name='Mic 2 Amp Source MUX' Differential
+$C name='Aux Switch' off,off
+$C name='Mixin Left Mic 1 Switch' on
+$C name='Mixin Left Mic 2 Switch' off
+$C name='Mixin Left Aux Left Switch' off
+$C name='Mixin Left Mixin Right Switch' off
+$C name='Mixin Right Mic 2 Switch' on
+$C name='Mixin Right Mic 1 Switch' off
+$C name='Mixin Right Aux Right Switch' off
+$C name='Mixin Right Mixin Left Switch' off
+$C name='Mixin PGA Switch' on,on
+$C name='Mixin PGA Volume' 7,7
+$C name='ADC Switch' on,on
+$C name='ADC Volume' 114,114
+$C name='DAI Left Source MUX' 'ADC Left'
+$C name='DAI Right Source MUX' 'ADC Right'
+
+# Outputs: door (left channel) -> DAC right -> speaker terminals,
+#          inside (right channel) -> DAC left -> headphone jack, left side
+$C name='DAC Mono Switch' off,off
+$C name='DAC Left Source MUX' 'DAI Input Right'
+$C name='DAC Right Source MUX' 'DAI Input Left'
+$C name='DAC Soft Mute Switch' off
+$C name='DAC Volume' 112,112
+$C name='Mixout Left DAC Left Switch' on
+$C name='Mixout Right DAC Right Switch' on
+
+# The codec's own analog mic/aux-to-output paths off -- intercomd carries
+# the audio, so these would play it twice
+$C name='Mixout Left Aux Left Switch' off
+$C name='Mixout Left Mixin Left Switch' off
+$C name='Mixout Left Mixin Right Switch' off
+$C name='Mixout Right Aux Right Switch' off
+$C name='Mixout Right Mixin Right Switch' off
+$C name='Mixout Right Mixin Left Switch' off
+
+$C name='Lineout Switch' on
+$C name='Lineout Volume' 48
+$C name='HP Jack Switch' on
+$C name='Headphone Switch' on,off
+$C name='Headphone Volume' 49,49
+```
+
+The headphone jack's right side stays off because it carries the same mix
+as the speaker terminals, i.e. door's audio. That also makes a mono
+3.5 mm plug safe there: a mono plug shorts the jack's right output to
+ground.
+
+Wired differently? Swap which `Mic` goes into `Mixin Left`/`Mixin Right`,
+or -- to put door on the headphone jack instead -- leave both `DAC ...
+Source MUX` at their own side (`'DAI Input Left'` for left, `'DAI Input
+Right'` for right) and switch the headphone right side on instead of the
+left.
+
+Levels (`Mic`, `Mixin PGA`, `Lineout`, `Headphone` volumes) are starting
+values: adjust with `alsamixer -c Zero` while talking. Then save the
+result as in test 7, so it survives a reboot:
+
+```sh
+sudo alsactl store -f /etc/codec-zero-intercom.state
+```
 
 ### S3. Each speaker on its own
 

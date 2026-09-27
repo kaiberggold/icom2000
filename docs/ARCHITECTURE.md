@@ -607,10 +607,11 @@ just a convention, it's checked on every `ctest` run.
 
 ### Centralized mixer state
 
-Mixer state (which connector feeds which ADC channel and which DAC channel
-drives which output -- door on the left, inside on the right -- with the
-codec's own analog mic-to-output paths off, plus levels and switches) is
-set exactly once, at boot, by
+Mixer state (which connector feeds which capture channel and which
+playback channel drives which output -- door on the left, inside on the
+right -- with the codec's own analog mic-to-output paths off, plus levels
+and switches; the exact `amixer` commands are in docs/SMOKE_TESTS.md "S2")
+is set exactly once, at boot, by
 `systemd/alsa-restore-codec-zero.service` running
 `alsactl restore -f /etc/codec-zero-intercom.state` -- see that unit's
 comments and `config/README.md` for why the state file itself isn't
