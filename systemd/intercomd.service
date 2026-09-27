@@ -23,6 +23,10 @@ SupplementaryGroups=gpio audio
 RuntimeDirectory=icom2000
 RuntimeDirectoryMode=0770
 
+# Lets the unprivileged daemon run its audio threads at SCHED_FIFO up to
+# this priority -- keep it >= [audio] rt_priority in /etc/icom2000.conf.
+LimitRTPRIO=20
+
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true

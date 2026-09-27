@@ -92,10 +92,10 @@ src/core/   reactor (EventLoop) + LoopThread, signal handling, logging
 src/config/ File (INI-style config reader), StationRegistry
 src/gpio/   IOutputPin/IInputPin interfaces + mock and libgpiod backends
 src/hw/     Pwm (software PWM), BellController, StatusLed, Tcm1171Controller
-src/audio/  IEngine interface, no-op engine, first ALSA engine (not wired in yet)
+src/audio/  IEngine interface, no-op engine, ALSA intercom engine (not wired in yet)
 src/ipc/    Unix-socket control protocol + server
 src/app/    intercomd (composition root)
-src/cli/    intercomctl
+src/cli/    intercomctl, icom-audiotest (runs the ALSA intercom for hardware checks)
 tests/      host-only unit tests + the architecture-invariants guard script
 docs/       architecture, cross-compile, VS Code/WSL2 setup, audio smoke tests
 config/     icom2000.conf, asound.conf (see config/README.md)

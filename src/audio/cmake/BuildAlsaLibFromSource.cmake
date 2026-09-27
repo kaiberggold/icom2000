@@ -49,11 +49,11 @@ function(icom_build_alsa_lib_from_source)
 
     set(ICOM_ALSA_LIB_GIT_URL "https://github.com/alsa-project/alsa-lib.git" CACHE STRING
         "Repository to fetch alsa-lib from when building it from source")
-    # Raspberry Pi OS Bookworm's version. Keep this matched to the Pi's own
-    # libasound2 (`dpkg -s libasound2`): the library reads the Pi's
-    # /usr/share/alsa/alsa.conf at runtime, so a library older than that
-    # config could meet syntax it doesn't know.
-    set(ICOM_ALSA_LIB_GIT_TAG "v1.2.8" CACHE STRING
+    # Raspberry Pi OS trixie's version (1.2.14). Keep this matched to the
+    # Pi's own libasound (`dpkg -l 'libasound2*'`): the library reads the
+    # Pi's /usr/share/alsa/alsa.conf at runtime, so a library older than
+    # that config could meet syntax it doesn't know.
+    set(ICOM_ALSA_LIB_GIT_TAG "v1.2.14" CACHE STRING
         "alsa-lib tag/commit to build when building it from source")
     mark_as_advanced(ICOM_ALSA_LIB_GIT_URL ICOM_ALSA_LIB_GIT_TAG)
 

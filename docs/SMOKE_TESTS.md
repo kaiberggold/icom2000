@@ -99,6 +99,11 @@ speaker-test -D icom_door_playback   -c 1 -t sine -f 440 -l 2
 **Pass:** both play. "No such device" means the `hw:Zero` card name in
 `asound.conf` needs fixing.
 
+Door plays on the card's left channel and inside on its right (see "Step
+2" below). With a single speaker, one of the two can be silent if the
+mixer drives that speaker from one channel only -- expected until the
+two-station mixer setup in S2.
+
 ## 4. Microphone records
 
 With no external mic connected, record from the Codec Zero's onboard mic
@@ -117,8 +122,7 @@ aplay -D icom_inside_playback /tmp/mic.wav
 To make a station use the onboard mic -- so `intercomd` logs it at
 startup, and the audio engine will pick it up once it's wired in --
 uncomment `capture_device = icom_onboard_mic_capture` in that station's
-section of `/etc/icom2000.conf`. One station at a time: two capture
-devices can't be open at once (test 6).
+section of `/etc/icom2000.conf`.
 
 ## 5. Capture and playback at the same time, without our code
 
@@ -133,18 +137,21 @@ which itself proves it works. Headphones are gentler.
 This is exactly what the engine's first step does, so it has to work here
 before our code is involved.
 
-## 6. Two captures at once should fail
+## 6. Two captures at once
 
-Confirms the known limitation step 2 has to solve:
+With the current `config/asound.conf` the card's capture stream is shared
+(`dsnoop`), so both stations can record at the same time:
 
 ```sh
 arecord -D icom_door_capture -f S16_LE -r 48000 -c 1 /dev/null &
-arecord -D icom_inside_capture -f S16_LE -r 48000 -c 1 /dev/null    # expect "Device or resource busy"
-kill %1
+arecord -D icom_inside_capture -f S16_LE -r 48000 -c 1 /dev/null    # keeps running, no error
+kill %1; kill %2
 ```
 
-**Pass means it fails.** That's the proof step 2 needs `dsnoop` (shared
-capture) and `dmix` (shared playback) in `asound.conf`.
+**Pass:** both run. "Device or resource busy" means `/etc/asound.conf` is
+still the older version without the shared devices -- copy the repo's
+`config/asound.conf` over again. (With that older version, this failure
+was expected and is what step 2 fixed.)
 
 ## 7. Mixer settings survive a reboot
 
@@ -178,16 +185,114 @@ mixer later, rerun step 1 to update the file.
 
 **Pass:** the tone plays after the reboot with no manual mixer work.
 
-## Record for step 2
+## Worth recording
 
 - The card id.
-- What the hardware really runs at underneath the `plug` conversion layer
-  -- rate, format, channel count -- while test 3 is playing:
-  `cat /proc/asound/card*/pcm0p/sub0/hw_params`.
+- What the hardware really runs at underneath the conversion layers --
+  rate, format, channel count. `/proc/asound/card*/pcm0p/sub0/hw_params`
+  only shows it while something is playing (otherwise it says `closed`),
+  so run it while test 3 plays in a second terminal.
 - A dump of the working mixer: `amixer -c Zero contents > mixer.txt`.
 - The Pi's ALSA library version, to match `ICOM_ALSA_LIB_GIT_TAG`
   (docs/CROSS_COMPILE.md "Building alsa-lib from source"):
-  `dpkg -s libasound2 | grep Version`.
+  `dpkg -l 'libasound2*'` (the package is `libasound2t64` on trixie).
+
+## Step 2: two stations
+
+With a mic and a speaker per station. The layout (`config/asound.conf`):
+the card's stereo channels are shared between the stations, **door =
+left, inside = right**, and `intercomd` -- not the codec -- carries the
+audio from one station to the other.
+
+### S1. Card runs the shared format
+
+`asound.conf`'s shared devices fix the card at 48 kHz, 16-bit, 2 channels:
+
+```sh
+aplay -D hw:Zero --dump-hw-params -f S16_LE -r 48000 -c 2 -d 1 /dev/zero
+```
+
+**Pass:** it plays a second of silence without an error, and the dump's
+`FORMAT` line includes `S16_LE`. If the card needs another format or rate,
+change `format`/`rate` in both shared devices in `asound.conf`.
+
+### S2. Mixer: each connector on its own channel
+
+Set the mixer (`alsamixer -c Zero`, or `amixer -c Zero`) so that:
+
+- door mic -> ADC left, inside mic -> ADC right;
+- DAC left -> door speaker, DAC right -> inside speaker;
+- the codec's own analog paths from the mics to the outputs are off --
+  `intercomd` carries the audio, so these would play it twice.
+
+The exact control names are the DA7212's, so `amixer -c Zero contents` and
+the DA7212 datasheet are the reference; the Pi-Codec state files from test
+1 are a starting point. Save the result as in test 7, so it survives a
+reboot.
+
+### S3. Each speaker on its own
+
+```sh
+speaker-test -D icom_door_playback   -c 1 -t sine -f 440 -l 1
+speaker-test -D icom_inside_playback -c 1 -t sine -f 880 -l 1
+```
+
+**Pass:** the low tone comes only from the door speaker, the high tone
+only from the inside speaker. Both at the door or both inside means the
+mixer feeds both speakers from the same channel.
+
+### S4. Each mic on its own
+
+```sh
+arecord -D icom_door_capture   -f S16_LE -r 48000 -c 1 -V mono /dev/null   # talk into each mic in turn
+arecord -D icom_inside_capture -f S16_LE -r 48000 -c 1 -V mono /dev/null
+```
+
+**Pass:** each VU meter moves for its own mic. A little movement from the
+other mic in the same room is acoustic crosstalk, not a routing mistake.
+
+### S5. Both speakers at once
+
+```sh
+speaker-test -D icom_door_playback -c 1 -t sine -f 440 -l 3 &
+speaker-test -D icom_inside_playback -c 1 -t sine -f 880 -l 3
+```
+
+**Pass:** both tones play at the same time, each on its own speaker (the
+shared `dmix` device at work).
+
+### S6. Our engine: `icom-audiotest`
+
+Runs the ALSA intercom engine -- the same code `intercomd` will run in
+step 3 -- between the first two stations in `/etc/icom2000.conf`, until
+Ctrl-C. Copy it from the Pi build first:
+
+```sh
+scp build/pi0-debug/src/cli/icom-audiotest <user>@<pi-host>:    # on the dev machine
+./icom-audiotest                                                # on the Pi; --help for options
+```
+
+Talk into each mic. Keep the stations in different rooms, or the volume
+low: a speaker next to the other station's mic will feed back.
+
+**Pass:**
+
+- each station hears the other, and never itself;
+- no `recovered from` warnings during a minute of talking -- those are
+  dropouts;
+- Ctrl-C prints `stopped`.
+
+It starts both directions or neither: if one station's device can't be
+opened, it prints why and exits.
+
+The audio threads should run at real-time priority (`[audio]
+rt_priority` in `icom2000.conf`), which a login user usually isn't
+allowed: then it logs `runs at normal priority, not SCHED_FIFO` and works
+anyway, just with less protection against dropouts. To allow it, add a
+file `/etc/security/limits.d/icom2000.conf` containing
+`@audio - rtprio 20` and log in again; `chrt -a -p $(pidof icom-audiotest)`
+then shows `SCHED_FIFO` priority 20 for two of its threads. (The
+`intercomd` service has this permission built in, via `LimitRTPRIO`.)
 
 ## Results
 
@@ -199,11 +304,17 @@ mixer later, rerun step 1 to update the file.
 | 3. Named devices | | | |
 | 4. Microphone | | | |
 | 5. Duplex | | | |
-| 6. Two captures fail | | | |
+| 6. Two captures at once | | | |
 | 7. Survives reboot | | | |
+| S1. Shared format | | | |
+| S2. Mixer channels | | | |
+| S3. Each speaker | | | |
+| S4. Each mic | | | |
+| S5. Both speakers | | | |
+| S6. icom-audiotest | | | |
 
 ## Not covered yet
 
-These tests exercise the hardware and config, not our `AlsaEngine`: the
-daemon can't run it yet. A small on-target tool running test 5 through
-`makeAlsaEngine()` would close that gap.
+`intercomd` itself still runs the no-op audio engine, so S6's
+`icom-audiotest` is where our engine meets the hardware until step 3 puts
+it into the daemon.

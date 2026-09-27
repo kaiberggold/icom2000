@@ -1,10 +1,12 @@
 #include "icom/audio/audio_engine.hpp"
 #include "icom/core/logger.hpp"
 
+#include <algorithm>
 #include <atomic>
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <stop_token>
 #include <string>
@@ -13,6 +15,8 @@
 #include <vector>
 
 #include <alsa/asoundlib.h>
+#include <pthread.h>
+#include <sched.h>
 
 namespace icom::audio
 {
@@ -67,8 +71,9 @@ namespace icom::audio
         class AlsaEngine final : public IEngine
         {
         public:
-            AlsaEngine(std::string captureDevice, std::string playbackDevice)
-                : captureDevice_(std::move(captureDevice)), playbackDevice_(std::move(playbackDevice)) {}
+            AlsaEngine(std::string captureDevice, std::string playbackDevice, int rtPriority)
+                : captureDevice_(std::move(captureDevice)), playbackDevice_(std::move(playbackDevice)),
+                  rtPriority_(rtPriority) {}
 
             ~AlsaEngine() override { stop(); }
 
@@ -134,6 +139,7 @@ namespace icom::audio
         private:
             void run(const std::stop_token& stopToken)
             {
+                raiseToRealtimePriority();
                 std::vector<std::int16_t> buffer(capturePeriodFrames_ * CHANNELS);
                 while (!stopToken.stop_requested())
                 {
@@ -175,6 +181,26 @@ namespace icom::audio
                               playbackDevice_);
                 }
                 running_.store(false);
+            }
+
+            void raiseToRealtimePriority() const
+            {
+                if (rtPriority_ <= 0)
+                {
+                    return;
+                }
+                sched_param param{};
+                param.sched_priority = rtPriority_;
+                const int err = pthread_setschedparam(pthread_self(), SCHED_FIFO, &param);
+                const std::string route = captureDevice_ + " -> " + playbackDevice_;
+                if (err != 0)
+                {
+                    log.warn("audio thread for " + route + " runs at normal priority, not SCHED_FIFO " +
+                             std::to_string(rtPriority_) + ": " + std::strerror(err) +
+                             " (needs CAP_SYS_NICE or RLIMIT_RTPRIO, see docs/ARCHITECTURE.md \"Audio boundary\")");
+                    return;
+                }
+                log.debug("audio thread for " + route + " runs at SCHED_FIFO " + std::to_string(rtPriority_));
             }
 
             bool writeToPlayback(const std::int16_t* data, snd_pcm_uframes_t frames)
@@ -264,6 +290,7 @@ namespace icom::audio
 
             const std::string captureDevice_;
             const std::string playbackDevice_;
+            const int rtPriority_;
 
             PcmHandle capture_;
             PcmHandle playback_;
@@ -275,11 +302,57 @@ namespace icom::audio
             std::jthread thread_;
         };
 
+        class EngineGroup final : public IEngine
+        {
+        public:
+            explicit EngineGroup(std::vector<std::unique_ptr<IEngine>> members) : members_(std::move(members)) {}
+
+            void start() override
+            {
+                for (const auto& member : members_)
+                {
+                    member->start();
+                    if (!member->isRunning())
+                    {
+                        stop();
+                        return;
+                    }
+                }
+            }
+
+            void stop() override
+            {
+                for (const auto& member : members_)
+                {
+                    member->stop();
+                }
+            }
+
+            bool isRunning() const override
+            {
+                return std::all_of(members_.begin(), members_.end(),
+                [](const auto & member) { return member->isRunning(); });
+            }
+
+        private:
+            std::vector<std::unique_ptr<IEngine>> members_;
+        };
+
     } // namespace
 
-    std::unique_ptr<IEngine> makeAlsaEngine(const config::Station& captureFrom, const config::Station& playbackTo)
+    std::unique_ptr<IEngine> makeAlsaEngine(const config::Station& captureFrom, const config::Station& playbackTo,
+                                            int rtPriority)
     {
-        return std::make_unique<AlsaEngine>(captureFrom.captureDevice, playbackTo.playbackDevice);
+        return std::make_unique<AlsaEngine>(captureFrom.captureDevice, playbackTo.playbackDevice, rtPriority);
+    }
+
+    std::unique_ptr<IEngine> makeAlsaIntercomEngine(const config::Station& a, const config::Station& b,
+            int rtPriority)
+    {
+        std::vector<std::unique_ptr<IEngine>> routes;
+        routes.push_back(makeAlsaEngine(a, b, rtPriority));
+        routes.push_back(makeAlsaEngine(b, a, rtPriority));
+        return std::make_unique<EngineGroup>(std::move(routes));
     }
 
 } // namespace icom::audio

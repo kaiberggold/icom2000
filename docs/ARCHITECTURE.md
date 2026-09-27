@@ -36,13 +36,15 @@ src/hw/     Domain logic built only on the gpio interfaces: Pwm (software
             StatusLed, and Tcm1171Controller (the stateful, event-driven
             example).
 src/audio/  IEngine interface, a no-op NullEngine (what the daemon
-            runs today), and a first ALSA engine not yet wired in -- see
-            "Audio boundary" below.
+            runs today), and the ALSA intercom engine, not yet wired in
+            -- see "Audio boundary" below.
 src/ipc/    The Unix-socket control protocol and its server.
 src/app/    daemon_main.cpp -- the composition root. Everything above is
             constructed and wired together here; nothing else in the tree
             knows this file exists.
-src/cli/    intercomctl -- a thin client over src/ipc's protocol.
+src/cli/    intercomctl -- a thin client over src/ipc's protocol -- and
+            icom-audiotest, which runs the ALSA intercom engine on its
+            own for hardware checks.
 tests/      Host-only unit tests (EventLoop + LoopThread + MockBackend +
             File + StatusLed + Pwm + the architecture-invariants guard
             script, see "Testing").
@@ -438,40 +440,62 @@ the daemon runs today, so it builds, runs, and reports `audio=down`...
 `audio=up`-but-silent honestly via `intercomctl status` without every
 other component needing to special-case "audio doesn't exist yet".
 
-### ALSA engine (step 1 of 3)
+### ALSA engine (steps 1 and 2 of 3)
 
-`makeAlsaEngine(captureFrom, playbackTo)`
-(`src/audio/src/alsa_audio_engine.cpp`) is the first real
-implementation, deliberately narrow: **one** mono route, 48 kHz S16_LE,
+Live door<->inside audio runs through `intercomd`, not the codec's analog
+crossbar: the codec only converts, and the boot-time mixer state keeps its
+own mic-to-output paths off (the audio would otherwise play twice). That's
+what makes software control -- mute, ring and dial tones, levels -- and
+the planned network extension possible.
+
+`makeAlsaEngine(captureFrom, playbackTo, rtPriority)`
+(`src/audio/src/alsa_audio_engine.cpp`) is one mono route, 48 kHz S16_LE,
 capturing from one station's named capture device and writing each
 period straight out to another station's named playback device, on its
-own `std::jthread`. It proves the ALSA plumbing in isolation --
-open/configure via `snd_pcm_set_params()` (the `plug` layer in
-`config/asound.conf` handles any rate/format conversion the codec needs),
-playback primed with one period short of a full buffer of silence
-(~40 ms of slack before an underrun, and roughly the route's latency),
-and overrun/underrun/suspend recovery via `snd_pcm_recover()`. `start()`
-never throws on a device problem: it logs why and leaves `isRunning()`
-false, and so does an unrecoverable error on the audio thread later --
-audio failing shouldn't take the bell down with it.
+own `std::jthread`: open/configure via `snd_pcm_set_params()` (the `plug`
+layer in `config/asound.conf` handles any rate/format conversion the
+codec needs), playback primed with one period short of a full buffer of
+silence (~40 ms of slack before an underrun, and roughly the route's
+latency), and overrun/underrun/suspend recovery via `snd_pcm_recover()`.
+`start()` never throws on a device problem: it logs why and leaves
+`isRunning()` false, and so does an unrecoverable error on the audio
+thread later -- audio failing shouldn't take the bell down with it.
+
+`makeAlsaIntercomEngine(a, b, rtPriority)` is the intercom: two such
+routes, `a`'s mic to `b`'s speaker and back, one thread each. It starts
+all or nothing -- if either route can't start, the other is stopped
+again -- and reports `isRunning()` only while both routes are up.
+
+**Real-time priority.** With `rtPriority` > 0 (`[audio] rt_priority` in
+`config/icom2000.conf`, default 20), each audio thread switches itself to
+`SCHED_FIFO` at that priority, so a busy moment elsewhere on the Pi Zero's
+single core can't starve it into a dropout. An unprivileged process needs
+permission for that: `systemd/intercomd.service` sets `LimitRTPRIO=20`.
+Without it -- e.g. running from the VS Code debugger as your login user
+-- the thread logs a warning and runs at normal priority; the audio still
+works, just with less protection against dropouts. (To allow it for a
+login user, a line like `@audio - rtprio 20` in
+`/etc/security/limits.d/` does it, after logging in again.)
+
+**No queue to the reactor, on purpose.** The audio threads and the rest of
+the daemon share exactly one piece of state today: whether each route is
+still running, an atomic flag. A lock-free queue earns its place once
+there's a message to carry -- e.g. mute/unmute commands, or tones to mix
+in -- which is step 3 or later, not now.
+
+**Two stations on one card.** The card's stereo capture and playback
+streams are shared through `dsnoop`/`dmix` in `config/asound.conf`, one
+channel per station: door = left, inside = right. See "Named ALSA
+devices" below.
+
+`icom-audiotest` (`src/cli/audiotest_main.cpp`) runs the intercom engine
+on its own, from the same config file, until Ctrl-C -- for checking it on
+the real hardware before the daemon runs it (docs/SMOKE_TESTS.md
+"Step 2").
 
 **Not yet wired into the daemon**: `daemon_main.cpp` still runs
-`makeNullEngine()`. The remaining steps:
-
-2. Both stations at once, a lock-free queue to the reactor thread, and
-   real-time scheduling for the audio thread(s). Blocked on
-   `config/asound.conf` first: all four named devices are `plug` aliases
-   onto the one `hw:Zero`, and a raw `hw` device only allows one capture
-   stream open at a time -- a second station's capture needs `dsnoop`
-   (and shared playback `dmix`) there, which that file's own caveats say
-   to verify on real hardware first.
-3. Swap it in as the daemon's engine and test against a real Pi Zero +
-   Codec Zero. **Open design question for this step**: `config/asound.conf`
-   currently says the live door/inside audio runs entirely inside the
-   DA7212 codec's own analog crossbar (set once at boot by alsactl), with
-   these PCM devices reserved for intercomd's own sounds. A digital
-   door->inside route on top of that would double the audio, so step 3
-   has to pick one path for live audio, not run both.
+`makeNullEngine()`. That's step 3: swap it in, and test against a real Pi
+Zero + Codec Zero with both stations connected.
 
 Tested without a sound card by `tests/alsa_engine_tests.cpp`: it points
 `HOME` at a scratch `.asoundrc` defining test PCMs on alsa-lib's own
@@ -479,9 +503,13 @@ Tested without a sound card by `tests/alsa_engine_tests.cpp`: it points
 pattern from a FIFO -- not a regular file, because `null` isn't paced in
 real time and the engine would otherwise spin at hundreds of MB/s; over
 a FIFO it consumes exactly what the test wrote and then blocks -- and the
-test checks the pattern arrives in the playback file bit-exact, with no
-dropped, repeated, or reordered samples (confirmed to catch a deliberately
-duplicated period and a deliberately dropped sample per period).
+tests check the pattern arrives in the playback file bit-exact, with no
+dropped, repeated, or reordered samples: for one route, and for the
+intercom with both directions at once (each station must hear exactly the
+other's mic). They also check the intercom starts all or nothing, down to
+not leaving a thread behind. Deliberately breaking the engine -- a
+duplicated period, a dropped sample per period, each station wired to its
+own speaker, no cleanup after a failed start -- makes them fail.
 
 When it's implemented, it should **not** join the reactor thread. Two mono
 ALSA duplex streams against the Codec Zero (handset audio, and
@@ -565,18 +593,24 @@ see `config/asound.conf`).
 `config/asound.conf` (installed as `/etc/asound.conf`) defines the PCM
 devices every `Station` names: `icom_door_capture`,
 `icom_door_playback`, `icom_inside_capture`, `icom_inside_playback`, plus
-`icom_onboard_mic_capture` for testing with the board's own mic. Today
-they're plain 1:1 aliases onto the one physical card (the file has the
-full rationale and caveats) -- what matters architecturally is that this
-is the *only* place a sound-card device string exists at all.
+`icom_onboard_mic_capture` for testing with the board's own mic. The
+card's stereo capture and playback streams are shared through `dsnoop`
+and `dmix` devices, so both stations -- and e.g. a `speaker-test` next to
+a running `intercomd` -- can use the card at once; each station device
+takes one channel of them through a `route` (door = left, inside =
+right; the file has the details and hardware assumptions). What matters
+architecturally is that this is the *only* place a sound-card device
+string exists at all.
 `scripts/check_architecture_invariants.sh` greps `src/` for one and fails
 the build if it finds one (see "Architecture invariants"), so this isn't
 just a convention, it's checked on every `ctest` run.
 
 ### Centralized mixer state
 
-Mixer state (the DA7212's crossbar routing between "door" and "inside",
-levels, switches) is set exactly once, at boot, by
+Mixer state (which connector feeds which ADC channel and which DAC channel
+drives which output -- door on the left, inside on the right -- with the
+codec's own analog mic-to-output paths off, plus levels and switches) is
+set exactly once, at boot, by
 `systemd/alsa-restore-codec-zero.service` running
 `alsactl restore -f /etc/codec-zero-intercom.state` -- see that unit's
 comments and `config/README.md` for why the state file itself isn't
@@ -694,8 +728,10 @@ actively-running loop). `icom_pwm_tests` covers `Pwm` the same way:
 construction/`setDutyTime()` clamping, and that 0%/100%/partial duty
 actually produce the expected pin behavior over a real background loop.
 `icom_audio_tests` covers the ALSA engine with no sound card, via
-file-backed test PCMs: bad device names leave it stopped, and a known
-sample pattern arrives bit-exact at playback (see "Audio boundary").
+file-backed test PCMs: bad device names leave it stopped, a known sample
+pattern arrives bit-exact at playback -- for one route and for the
+intercom's two directions at once -- and the intercom starts all or
+nothing (see "Audio boundary").
 `architecture_invariants` just runs
 `scripts/check_architecture_invariants.sh` (see "Architecture
 invariants"). `GpiodBackend` isn't in this `ctest` suite (host-dev builds
@@ -714,12 +750,12 @@ Roughly in the order it'd need doing to become a real intercom:
    assignments"); fix polarity/line numbers.
 2. Pulse-dial decoding off the same hook-detect edges
    `Tcm1171Controller` already timestamps.
-3. Finish the ALSA `IEngine` (step 1 of 3 done -- see "Audio boundary"
-   for steps 2 and 3), plus a ring/tone generator for the TCM1171's ring
-   cadence.
-4. Verified per-channel routing in `config/asound.conf` (currently plain
-   1:1 aliases -- see that file's caveats) once there's real hardware to
-   check `route`/channel indices against.
+3. Run the ALSA intercom engine in the daemon (steps 1 and 2 of 3 done
+   -- see "Audio boundary"), plus a ring/tone generator for the TCM1171's
+   ring cadence.
+4. Verify the per-channel routing in `config/asound.conf` (door = left,
+   inside = right) and the matching mixer state on the real hardware with
+   both stations connected (docs/SMOKE_TESTS.md "Step 2").
 5. Persist/report richer line state over the control protocol (e.g. call
    duration, last-ring time) once there's a client that wants it.
 6. `sd_notify()`/watchdog integration once there's a concrete failure mode

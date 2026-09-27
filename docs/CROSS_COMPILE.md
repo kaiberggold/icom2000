@@ -303,7 +303,7 @@ OS filesystem, and rebuilding it yourself is pure waste), set
 on `host-dev`, which uses the dev machine's own `libasound2-dev`)
 cross-compiles alsa-lib (`libasound`, which the ALSA audio engine links)
 the same way (`src/audio/cmake/BuildAlsaLibFromSource.cmake`): fetched
-as a git tag (`ICOM_ALSA_LIB_GIT_TAG`, default `v1.2.8`) from
+as a git tag (`ICOM_ALSA_LIB_GIT_TAG`, default `v1.2.14`) from
 `ICOM_ALSA_LIB_GIT_URL` (default the project's GitHub repository), built
 as a static library with the toolchain's own C compiler and the same
 ARMv6 flags, and linked into `intercomd` -- so there's still no `.so` to
@@ -324,9 +324,10 @@ Two details that matter at runtime on the Pi:
   reads its own config from -- `/usr/share/alsa/alsa.conf` -- and that
   has to be the Pi's.
 - Keep `ICOM_ALSA_LIB_GIT_TAG` matched to the Pi's own library version
-  (`dpkg -s libasound2 | grep Version` on the Pi; `v1.2.8` is Raspberry
-  Pi OS Bookworm's). The library reads the Pi's installed `alsa.conf`, and
-  a library older than that config could meet syntax it doesn't know.
+  (`dpkg -l 'libasound2*'` on the Pi -- the package is `libasound2t64` on
+  trixie, `libasound2` before it; `v1.2.14` is trixie's, `v1.2.8`
+  Bookworm's). The library reads the Pi's installed `alsa.conf`, and a
+  library older than that config could meet syntax it doesn't know.
 
 Components this project doesn't use are left out (`--disable-ucm
 --disable-topology --disable-rawmidi --disable-hwdep --disable-seq
