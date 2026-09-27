@@ -225,6 +225,26 @@ breakpoints, stepping, variable inspection, watch expressions -- just
 proxied over TCP to `gdbserver`, so expect a bit more latency on
 step/continue than the local host config.
 
+### Copying to the Pi without debugging
+
+Two tasks (**Terminal > Run Task...**) copy things to the Pi without
+building or starting anything, using the same host/user prompts:
+
+- **`pi-sync-app`** -- the debug session's copy step on its own
+  (`scripts/sync-app.sh`): the current `pi0-debug` build as
+  `<deploy dir>/intercomd-debug`, plus `intercomctl` and `icom-audiotest`.
+  Build first (`cmake-build-pi0-debug`); stop a running debug session
+  first, or the copy fails with "Text file busy".
+- **`pi-sync-config`** -- `config/icom2000.conf` and `config/asound.conf`
+  to `/etc` on the Pi (`scripts/sync-config.sh`). Before replacing a file
+  it keeps the old one as `/etc/<file>.bak-<timestamp>`, e.g.
+  `/etc/asound.conf.bak-20260927-143005`; unchanged files are left alone.
+  It uses `sudo` on the Pi, so it may ask for the Pi user's password in
+  the task terminal.
+
+Both scripts also work from a plain terminal: `scripts/sync-app.sh
+pi@raspberrypi.local`, `scripts/sync-config.sh pi@raspberrypi.local`.
+
 `gdbserver`'s default port `:2345` has no authentication -- it's bound to
 whatever interface the Pi is reachable on for as long as the task is
 running, so treat a debug session as something you start when you need it

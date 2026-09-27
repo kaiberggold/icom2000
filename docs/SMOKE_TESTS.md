@@ -22,23 +22,28 @@ running `intercomd` as a service.
 From the repo checkout on your dev machine:
 
 ```sh
-scp config/asound.conf config/icom2000.conf systemd/alsa-restore-codec-zero.service \
-    scripts/codec-zero-mixer.sh <user>@<pi-host>:
+scripts/sync-config.sh <user>@<pi-host>     # asound.conf, icom2000.conf -> /etc on the Pi
+scp systemd/alsa-restore-codec-zero.service scripts/codec-zero-mixer.sh <user>@<pi-host>:
 ```
+
+`sync-config.sh` (VS Code task `pi-sync-config`) installs the named
+devices (`icom_*`) the tests use and `/etc/icom2000.conf`, keeping any
+older version as `/etc/<file>.bak-<timestamp>`; rerun it after changing
+either file in the repo. `alsa-restore-codec-zero.service` is only needed
+for test 7, `codec-zero-mixer.sh` for S2.
 
 On the Pi:
 
 ```sh
-sudo apt install alsa-utils             # aplay/arecord/speaker-test/alsactl; usually preinstalled
-sudo cp asound.conf /etc/asound.conf    # the named devices (icom_*) the tests use
-sudo cp icom2000.conf /etc/icom2000.conf
-groups                                  # should include "audio" and "gpio"
+sudo apt install alsa-utils    # aplay/arecord/speaker-test/alsactl; usually preinstalled
+groups                         # should include "audio" and "gpio"
 ```
 
 `/etc/icom2000.conf` matters because the debugger starts `intercomd`
-without `--config`, so it reads that path. Edit it there -- e.g. to switch
-a station to the onboard mic (test 4). `alsa-restore-codec-zero.service`
-is only needed for test 7.
+without `--config`, so it reads that path. To change it -- e.g. to switch
+a station to the onboard mic (test 4) -- edit `config/icom2000.conf` in
+the repo and sync again; an edit made on the Pi directly survives only
+until the next sync, as a `.bak-` file.
 
 The debugger runs `intercomd` as your SSH user, so that user needs the
 `audio` and `gpio` groups. Raspberry Pi OS's default user has both.
@@ -304,8 +309,8 @@ step 3 -- between the first two stations in `/etc/icom2000.conf`, until
 Ctrl-C. Copy it from the Pi build first:
 
 ```sh
-scp build/pi0-debug/src/cli/icom-audiotest <user>@<pi-host>:    # on the dev machine
-./icom-audiotest                                                # on the Pi; --help for options
+scripts/sync-app.sh <user>@<pi-host>    # on the dev machine (VS Code task: pi-sync-app)
+./icom-audiotest                        # on the Pi; --help for options
 ```
 
 Talk into each mic. Keep the stations in different rooms, or the volume

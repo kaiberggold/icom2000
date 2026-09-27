@@ -11,6 +11,10 @@ from.
 | `asound.conf` | `/etc/asound.conf` | tracked in this repo, edit directly |
 | `codec-zero-intercom.state` | `/etc/codec-zero-intercom.state` | **not in this repo** -- generated on real hardware, see below |
 
+`scripts/sync-config.sh <user>@<pi-host>` (VS Code task `pi-sync-config`)
+installs the first two on a Pi, keeping any older version as
+`/etc/<file>.bak-<timestamp>`.
+
 ## The alsactl state file
 
 `codec-zero-intercom.state` is not shipped here and shouldn't be
