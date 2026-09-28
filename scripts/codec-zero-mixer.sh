@@ -2,8 +2,11 @@
 # Sets the Codec Zero's mixer for the two-station intercom (see
 # docs/SMOKE_TESTS.md "S2" for the wiring this assumes and why):
 #
-#   door   (left channel):  MIC jack (Mic 1)       -> speaker terminals (Lineout)
-#   inside (right channel): onboard mic (Mic 2)    -> headphone jack, left side
+#   door   (left channel):  AUX IN jack, left (Aux Left)  -> speaker terminals (Lineout)
+#   inside (right channel): onboard mic (Mic 2)           -> headphone jack, left side
+#
+# The door input is line level -- an amplified mic -- so it goes into the
+# AUX input, not a mic input.
 #
 # with the codec's own analog mic-to-output paths off -- intercomd carries
 # the audio. Run it on the Pi, adjust levels in `alsamixer -c Zero` if
@@ -37,27 +40,29 @@ set_control() {
     fi
 }
 
-# Inputs: door mic (MIC jack) -> left channel, inside mic (onboard) -> right.
-set_control 'MIC Jack Switch' on
+# Inputs: door (AUX IN left) -> left channel, inside mic (onboard) -> right.
+set_control 'AUX Jack Switch' on
 set_control 'Onboard MIC Switch' on
-set_control 'AUX Jack Switch' off
-set_control 'Mic 1 Switch' on
+set_control 'MIC Jack Switch' off
+set_control 'Aux Switch' on,off
+# 53 = 0 dB (the AUX gain runs -52.5 dB .. +15 dB in 1.5 dB steps).
+set_control 'Aux Volume' 53,53
+set_control 'Mic 1 Switch' off
 set_control 'Mic 2 Switch' on
-set_control 'Mic 1 Volume' 5
 set_control 'Mic 2 Volume' 5
-set_control 'Mic 1 Amp Source MUX' Differential
 set_control 'Mic 2 Amp Source MUX' Differential
-set_control 'Aux Switch' off,off
-set_control 'Mixin Left Mic 1 Switch' on
+set_control 'Mixin Left Aux Left Switch' on
+set_control 'Mixin Left Mic 1 Switch' off
 set_control 'Mixin Left Mic 2 Switch' off
-set_control 'Mixin Left Aux Left Switch' off
 set_control 'Mixin Left Mixin Right Switch' off
 set_control 'Mixin Right Mic 2 Switch' on
 set_control 'Mixin Right Mic 1 Switch' off
 set_control 'Mixin Right Aux Right Switch' off
 set_control 'Mixin Right Mixin Left Switch' off
 set_control 'Mixin PGA Switch' on,on
-set_control 'Mixin PGA Volume' 7,7
+# Left 3 = 0 dB for the line-level door input, right 7 = +6 dB for the
+# onboard mic (-4.5 dB .. +18 dB in 1.5 dB steps).
+set_control 'Mixin PGA Volume' 3,7
 set_control 'ADC Switch' on,on
 set_control 'ADC Volume' 114,114
 set_control 'DAI Left Source MUX' 'ADC Left'

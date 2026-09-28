@@ -229,7 +229,7 @@ Which connector feeds which channel is set in the codec's mixer.
 
 | Station | Mic | Speaker |
 |---|---|---|
-| door (left channel) | MIC jack (`Mic 1`) | speaker terminals (`Lineout`) |
+| door (left channel) | amplified mic on the AUX IN jack, left (`Aux Left`) | speaker terminals (`Lineout`) |
 | inside (right channel) | onboard mic (`Mic 2`) | headphone jack, left side (`Headphone`) |
 
 Two things about the Codec Zero decide the output side (from the kernel's
@@ -257,8 +257,15 @@ as the speaker terminals, i.e. door's audio. That also makes a mono
 3.5 mm plug safe there: a mono plug shorts the jack's right output to
 ground.
 
-Wired differently? Edit the script: swap which `Mic` goes into `Mixin
-Left`/`Mixin Right`, or -- to put door on the headphone jack instead --
+The door mic is amplified, i.e. line level, so it goes into the AUX input
+at 0 dB rather than a mic input: those are built for a bare microphone --
+they supply a bias voltage, and Raspberry Pi's settings run them at
++24 dB of preamp gain, which would clip a line-level signal. An
+unamplified mic would go on the MIC jack (`Mic 1`) instead.
+
+Wired differently? Edit the script: change which input (`Aux Left`,
+`Mic 1`, `Mic 2`) goes into `Mixin Left`/`Mixin Right`, or -- to put door
+on the headphone jack instead --
 set both `DAC ... Source MUX` to their own side (`'DAI Input Left'` for
 left, `'DAI Input Right'` for right) and switch the headphone right side
 on instead of the left.
@@ -291,6 +298,9 @@ arecord -D icom_inside_capture -f S16_LE -r 48000 -c 1 -V mono /dev/null
 
 **Pass:** each VU meter moves for its own mic. A little movement from the
 other mic in the same room is acoustic crosstalk, not a routing mistake.
+If the door meter sits at the top while you talk, the amplified mic is
+clipping: lower `Aux` in `alsamixer -c Zero` (or the mic amplifier's own
+gain); if it barely moves, raise `Mixin PGA` left.
 
 ### S5. Both speakers at once
 
