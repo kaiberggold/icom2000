@@ -345,6 +345,26 @@ file `/etc/security/limits.d/icom2000.conf` containing
 then shows `SCHED_FIFO` priority 20 for two of its threads. (The
 `intercomd` service has this permission built in, via `LimitRTPRIO`.)
 
+## Troubleshooting: leftover shared memory
+
+The shared devices (`dsnoop`/`dmix`) keep their state in System V shared
+memory and semaphores. A process that crashed, or an older `asound.conf`
+whose keys clashed (see the comment above the shared devices there), can
+leave segments behind, and opening a station device then fails -- e.g.
+"unable to create IPC shm instance" or "Invalid argument". With nothing
+using the card (stop `icom-audiotest`, `intercomd`, `arecord`/`aplay`):
+
+```sh
+ipcs -m                 # leftovers show "nattch" 0
+ipcrm -m <shmid>        # each leftover, by its shmid (second column)
+ipcs -s                 # the same for semaphores, if it still fails
+ipcrm -s <semid>
+```
+
+Use `sudo ipcrm` for segments another user created, e.g. the `icom2000`
+service user. Only remove entries with `nattch` 0 -- anything attached
+still belongs to a running program.
+
 ## Results
 
 | Test | Date | Result | Notes |
