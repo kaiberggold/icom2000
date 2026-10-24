@@ -1,11 +1,16 @@
 # Audio smoke tests (Pi Zero + Codec Zero)
 
-Manual bring-up checks for the audio hardware, to run on the Pi before
-building on the ALSA engine (see docs/ARCHITECTURE.md "Audio boundary").
-Ordered so each test only relies on what the previous ones proved. They
-use the standard ALSA tools (`alsa-utils`), not our code: `intercomd`
-still runs the no-op engine and never opens the sound card, so it can
-stay running.
+Manual bring-up checks for the audio hardware and the daemon's audio, to
+run on the Pi (see docs/ARCHITECTURE.md "Audio boundary"). Ordered so
+each test only relies on what the previous ones proved. Tests 0-7 and
+S1-S5 use the standard ALSA tools (`alsa-utils`), S6 our engine on its
+own, D1-D3 the daemon itself.
+
+**Stop `intercomd` for tests 0-7 and S1-S6.** It runs the intercom from
+startup, and the shared devices let it use the card next to the test
+tools -- so it would play along: a test tone would also be picked up by
+the other station's mic and played back, and S6 would make every station
+hear the other twice.
 
 **Safety:** the Codec Zero's speaker output is a bridged class-D amp. Use
 a 4-8 Ω speaker, never connect either speaker terminal to ground (a scope
@@ -314,9 +319,9 @@ shared `dmix` device at work).
 
 ### S6. Our engine: `icom-audiotest`
 
-Runs the ALSA intercom engine -- the same code `intercomd` will run in
-step 3 -- between the first two stations in `/etc/icom2000.conf`, until
-Ctrl-C. Copy it from the Pi build first:
+Runs the ALSA intercom engine -- the same code `intercomd` runs --
+between the first two stations in `/etc/icom2000.conf`, until Ctrl-C,
+without the rest of the daemon. Copy it from the Pi build first:
 
 ```sh
 scripts/sync-app.sh <user>@<pi-host>    # on the dev machine (VS Code task: pi-sync-app)
@@ -344,6 +349,43 @@ file `/etc/security/limits.d/icom2000.conf` containing
 `@audio - rtprio 20` and log in again; `chrt -a -p $(pidof icom-audiotest)`
 then shows `SCHED_FIFO` priority 20 for two of its threads. (The
 `intercomd` service has this permission built in, via `LimitRTPRIO`.)
+
+## Step 3: `intercomd`
+
+The daemon itself, running the same intercom as S6 from startup. After S6
+passes, with `icom-audiotest` stopped.
+
+### D1. Audio comes up
+
+Start `intercomd` from the VS Code debugger ("Debug intercomd on Pi
+Zero"; it reads `/etc/icom2000.conf`), or after `scripts/sync-app.sh` on
+the Pi directly:
+
+```sh
+./intercomd-debug --socket /tmp/icom.sock --log-console
+./intercomctl -s /tmp/icom.sock status          # in a second terminal
+```
+
+**Pass:** `STATUS` ends in `audio=up`, and the log shows two `routing
+icom_..._capture -> icom_..._playback` lines. `audio=down` means the
+engine couldn't start: the `audio.alsa` error just before says why (e.g.
+an old `/etc/asound.conf`, or `icom-audiotest` still holding the card).
+The bell (`./intercomctl -s /tmp/icom.sock bell ring 300`) works either
+way.
+
+### D2. Talk through it
+
+As in S6: each station hears the other, never itself, with no `recovered
+from` warnings in a minute of talking.
+
+### D3. Clean shutdown
+
+Ctrl-C in the debug session's terminal (or `kill <pid>`).
+
+**Pass:** the log ends with `received signal`, then `stopped` -- the audio
+threads stopped and the daemon exited on its own. A terminal that just
+says `Terminated`, without `stopped`, means the signal killed the process
+instead.
 
 ## Troubleshooting: leftover shared memory
 
@@ -383,9 +425,12 @@ still belongs to a running program.
 | S4. Each mic | | | |
 | S5. Both speakers | | | |
 | S6. icom-audiotest | | | |
+| D1. intercomd audio up | | | |
+| D2. Talk through intercomd | | | |
+| D3. Clean shutdown | | | |
 
 ## Not covered yet
 
-`intercomd` itself still runs the no-op audio engine, so S6's
-`icom-audiotest` is where our engine meets the hardware until step 3 puts
-it into the daemon.
+The audio runs always-on: there's no call state yet that mutes it while
+nobody's talking, and no ring or dial tones (docs/ARCHITECTURE.md "Audio
+boundary").

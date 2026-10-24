@@ -40,6 +40,19 @@ target_link_libraries(icom_audio_tests PRIVATE icom::audio icom::config icom::wa
 
 add_test(NAME icom_audio_tests COMMAND icom_audio_tests)
 
+# The real intercomd + intercomctl, end to end, with stand-in audio
+# devices. Python only drives them; skipped (with a note) without it.
+find_package(Python3 COMPONENTS Interpreter)
+if(Python3_Interpreter_FOUND)
+    add_test(
+        NAME daemon_integration
+        COMMAND "${Python3_EXECUTABLE}" -I "${CMAKE_CURRENT_SOURCE_DIR}/daemon_integration_test.py"
+                $<TARGET_FILE:intercomd> $<TARGET_FILE:intercomctl> "${CMAKE_SOURCE_DIR}/config/icom2000.conf"
+    )
+else()
+    message(STATUS "python3 not found -- skipping the daemon_integration test")
+endif()
+
 # Enforces the "future-proofing for the network extension" architecture
 # invariants (docs/ARCHITECTURE.md "Architecture invariants") on every
 # `ctest` run, not just when someone remembers to run the script by hand.

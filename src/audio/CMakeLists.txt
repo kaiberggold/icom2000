@@ -1,5 +1,4 @@
 add_library(icom_audio STATIC
-    src/null_audio_engine.cpp
     src/alsa_audio_engine.cpp
 )
 add_library(icom::audio ALIAS icom_audio)

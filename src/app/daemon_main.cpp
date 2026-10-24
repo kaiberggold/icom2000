@@ -190,16 +190,24 @@ int main(int argc, char** argv) {
                   << ")\n";
         return 1;
     }
+    unsigned audioRtPriority = 20;
+    try {
+        audioRtPriority = config.getUint("audio", "rt_priority", audioRtPriority);
+    } catch (const std::exception& e) {
+        std::cerr << "intercomd: " << opts.configPath << ": invalid [audio] rt_priority (" << e.what()
+                  << ")\n";
+        return 1;
+    }
 
     const std::string socketPath =
         opts.socketPath.value_or(config.get("daemon", "socket_path", "/run/icom2000.sock"));
     const std::string gpioChip = opts.gpioChip.value_or(config.get("daemon", "gpio_chip", "gpiochip0"));
 
     // The central station name -> device mapping (requirement: stations
-    // as logical names, never "left"/"right" or a channel index). Nothing
-    // consumes the device names yet beyond handing them to the (still
-    // stubbed) audio engine below, but every station-aware component from
-    // here on refers to "door"/"inside" by name, never by channel.
+    // as logical names, never "left"/"right" or a channel index). The
+    // audio engine below gets its device names from here; every
+    // station-aware component refers to "door"/"inside" by name, never by
+    // channel.
     const icom::config::StationRegistry stations(config);
     for (const auto& station : stations.all()) {
         log.info("station \"" + station.name + "\": capture=" + station.captureDevice +
@@ -256,8 +264,21 @@ int main(int argc, char** argv) {
     StatusLed statusLed(gpioBackend->requestOutput(
                             PinConfig{gpioChip, statusLedLine, "icom2000-status-led"}, Level::LOW));
 
-    auto audio = icom::audio::makeNullEngine(stations);
-    audio->start();
+    // The intercom: the first two stations, each one's mic to the other's
+    // speaker, on their own audio threads -- created here, after
+    // SignalWatcher, for the same signal-mask reason as backgroundLoop.
+    // Running from startup, not per call yet. If it can't start (e.g. no
+    // such ALSA device), it has logged why; everything else carries on and
+    // STATUS reports audio=down.
+    std::unique_ptr<icom::audio::IEngine> audio;
+    if (stations.all().size() >= 2) {
+        audio = icom::audio::makeAlsaIntercomEngine(stations.all()[0], stations.all()[1],
+                static_cast<int>(audioRtPriority));
+        audio->start();
+    } else {
+        log.error("audio needs two stations in [stations]; running without audio");
+    }
+    const auto audioUp = [&audio] { return audio && audio->isRunning(); };
 
     icom::ipc::ControlServer server(socketPath, loop);
 
@@ -291,7 +312,7 @@ int main(int argc, char** argv) {
     server.registerCommand("STATUS", [&](const auto&) {
         return CommandResult::success(std::string("line=") + icom::hw::toString(line.state()) +
                                       " bell=" + (bell.isRinging() ? "ringing" : "silent") +
-                                      " audio=" + (audio->isRunning() ? "up" : "down"));
+                                      " audio=" + (audioUp() ? "up" : "down"));
     });
 
     server.start();
@@ -310,7 +331,9 @@ int main(int argc, char** argv) {
     log.info("ready");
     loop.run();
 
+    if (audio) {
+        audio->stop();
+    }
     log.info("stopped");
-    audio->stop();
     return 0;
 }
