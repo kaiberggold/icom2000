@@ -12,13 +12,15 @@ are split the way they are.
 
 ## Status
 
-This is a scaffold, not a working intercom. `intercomd` runs, accepts
-control-socket commands, drives a real bell pin end-to-end (via the mock
-GPIO backend on a dev host; via libgpiod on target), and models TCM1171
-line state -- but hook detection polarity, pulse-dial decoding, ring
-cadence timing, and the entire audio path are unimplemented or
-placeholder. See inline `TODO`s and "Pin assignments" below before
-connecting real hardware.
+A working two-station audio path, but not yet a complete intercom.
+`intercomd` runs, accepts control-socket commands, drives a real bell pin
+end-to-end (via the mock GPIO backend on a dev host; via libgpiod on
+target), models TCM1171 line state, and runs the door<->inside intercom
+over ALSA (see "Audio boundary") -- always on, from startup to shutdown.
+Still unimplemented or placeholder: call state (muting the audio while
+nobody's talking, ring and dial tones), hook detection polarity,
+pulse-dial decoding, and ring cadence timing. See inline `TODO`s and "Pin
+assignments" below before connecting real hardware.
 
 ## Module layout
 
@@ -44,9 +46,10 @@ src/app/    daemon_main.cpp -- the composition root. Everything above is
 src/cli/    intercomctl -- a thin client over src/ipc's protocol -- and
             icom-audiotest, which runs the ALSA intercom engine on its
             own for hardware checks.
-tests/      Host-only unit tests (EventLoop + LoopThread + MockBackend +
-            File + StatusLed + Pwm + the architecture-invariants guard
-            script, see "Testing").
+tests/      Host-only tests: unit tests per module (EventLoop + LoopThread
+            + MockBackend, logging, File + StationRegistry, StatusLed,
+            Pwm, the ALSA engine), a daemon integration test, and the
+            architecture-invariants guard script -- see "Testing".
 config/     Deployment configuration -- see "Configuration" below.
 ```
 
@@ -79,9 +82,10 @@ how that's actually enforced.
 second thread running a second, independent `EventLoop` for the small
 amount of timing-sensitive periodic work that shouldn't have to wait its
 turn on the main one -- see "Software PWM" below for what that's for and
-why. Everything else in this section describes the main loop; the second
-thread is deliberately kept minimal and is covered separately. On the main
-loop, every source of work is a file descriptor:
+why -- and the two audio threads, one per direction of the intercom (see
+"Audio boundary"). Everything else in this section describes the main
+loop; the other threads are deliberately kept minimal and are covered
+separately. On the main loop, every source of work is a file descriptor:
 
 - the TCM1171 hook-detect GPIO line's edge-event fd (from libgpiod, or the
   mock backend's eventfd),
@@ -113,12 +117,13 @@ This reactor model is a deliberate fit for a Pi Zero: one ARM1176JZF-S
 core at ~1GHz has nothing to gain from a thread *pool* for this workload.
 It's mostly single-threaded too, in the sense that matters: everything in
 `src/core`, `src/gpio`, `src/hw`, and `src/ipc` that talks to the *main*
-loop still needs no locking there, and a future real `IEngine` still won't
-share the reactor thread either (see "Audio boundary" below). The one
-deliberate exception is the second thread "Software PWM" introduces --
-narrowly scoped (one more `EventLoop`, plus whatever needs to schedule
-work onto it from the main thread), not a general invitation to reach for
-`std::thread` elsewhere in this codebase.
+loop still needs no locking there, and the audio engine doesn't share the
+reactor thread either (see "Audio boundary" below). The deliberate
+exceptions are the second thread "Software PWM" introduces -- narrowly
+scoped (one more `EventLoop`, plus whatever needs to schedule work onto it
+from the main thread) -- and the audio threads, which share nothing with
+the rest of the daemon but an atomic "still running" flag. Neither is a
+general invitation to reach for `std::thread` elsewhere in this codebase.
 
 ### OS interaction, concretely
 
@@ -303,11 +308,11 @@ that interface:
   actual API, from a `const` member function -- `request_` is now
   `mutable`, since reading a pin's value is logically const from
   `IInputPin::read()`'s perspective regardless of that binding's own
-  constness. **Not yet verified on real hardware** -- the toolchain used
-  to compile-test it cannot itself produce valid ARMv6 output (see
-  docs/CROSS_COMPILE.md's "Read this first"), so this confirms the code
-  is correct C++ against the real API, not that it behaves correctly
-  against a real GPIO chip.
+  constness. On the Pi, built with an ARMv6 toolchain (see
+  docs/CROSS_COMPILE.md), it drives the bell and status LED inside
+  `intercomd` (docs/SMOKE_TESTS.md "D1" rings the bell). **The input side
+  -- hook-detect edges -- is not yet verified on real hardware** (see
+  "Pin assignments").
 
 Which backend `makeDefaultBackend()` returns is a compile-time choice
 (`ICOM_WITH_LIBGPIOD`), not a runtime one -- there is no reason a Pi
@@ -405,7 +410,7 @@ destroyed).
 ### Pin assignments (placeholder)
 
 **Everything below is illustrative, not verified against a schematic**,
-with one exception: GPIO23/24/27 are fixed by the HiFiBerry Codec Zero
+with one exception: GPIO23/24/27 are fixed by the Raspberry Pi Codec Zero
 HAT's own spec, not a software choice -- **Power LED** (unconditional,
 not GPIO-driven), **green status LED = GPIO23**, **red status LED =
 GPIO24**, **tactile button = GPIO27**. `gpiochip0` lines 17 (bell), 5
@@ -564,10 +569,11 @@ become a clean startup error, not a stack unwind.
 
 Precedence for the handful of values with a CLI flag (`--socket`,
 `--gpio-chip`) is: the flag, if given, wins; otherwise the config file's
-`[daemon]` section; otherwise the built-in default. GPIO line numbers
-(`[gpio.bell]`, `[gpio.tcm1171]`) have no CLI override -- there was no
-reason to add one -- but follow the same config-file-then-built-in-default
-fallback.
+`[daemon]` section; otherwise the built-in default. Everything else --
+GPIO line numbers and timings (`[gpio.bell]`, `[gpio.tcm1171]`,
+`[gpio.status_led]`) and the audio threads' priority (`[audio]
+rt_priority`) -- has no CLI override (there was no reason to add one),
+but follows the same config-file-then-built-in-default fallback.
 
 ### Stations
 
@@ -575,16 +581,15 @@ fallback.
 is the **one place** a station name is tied to a physical/logical audio
 channel: `config/icom2000.conf`'s `[stations]` (the name list) and
 `[station.<name>]` (that station's named capture/playback devices,
-defined in `config/asound.conf`) sections. Everything else -- today, just
-the `IEngine` factory; later, whatever actually streams audio --
-refers to stations as `"door"`/`"inside"` and nothing else. No code
+defined in `config/asound.conf`) sections. Everything else -- the audio
+engine, `daemon_main.cpp`, `icom-audiotest` -- refers to stations as
+`"door"`/`"inside"` and nothing else. No code
 anywhere works with "left"/"right" or a channel index; there wouldn't
 even be a natural place to put that, since a `Station` only exposes
 a name and two device-name strings.
 
 This is what makes the eventual network extension (a third,
-possibly-remote station, or "door"/"inside" moving from the codec's
-analog crossbar to independent per-station digital capture/playback) a
+possibly-remote station, or a station moving to a different device) a
 config-file change: add a `[station.mumble]` entry, or repoint an
 existing station's `capture_device`/`playback_device` at a different
 named PCM device in `config/asound.conf`. Nothing that refers to stations
@@ -595,8 +600,11 @@ The same mechanism covers testing without the real microphones: the
 shipped `config/icom2000.conf` has a commented-out
 `capture_device = icom_onboard_mic_capture` override in each station's
 section, taking that station's input from the Codec Zero's onboard mic
-instead (one station at a time; the mixer state has to route that mic,
-see `config/asound.conf`).
+instead. That device averages both capture channels, so it hears the
+onboard mic wherever the mixer state puts it -- with
+`scripts/codec-zero-mixer.sh`'s state, that's already the inside
+station's channel, and the door input is mixed in at half level too (see
+`config/asound.conf`).
 
 ### Named ALSA devices
 
@@ -620,14 +628,15 @@ just a convention, it's checked on every `ctest` run.
 Mixer state (which connector feeds which capture channel and which
 playback channel drives which output -- door on the left, inside on the
 right -- with the codec's own analog mic-to-output paths off, plus levels
-and switches; `scripts/codec-zero-mixer.sh` sets it up, see docs/SMOKE_TESTS.md "S2")
-is set exactly once, at boot, by
+and switches) is set exactly once, at boot, by
 `systemd/alsa-restore-codec-zero.service` running
-`alsactl restore -f /etc/codec-zero-intercom.state` -- see that unit's
-comments and `config/README.md` for why the state file itself isn't
-shipped in this repo (it has to be captured from a live, already-tuned
-system; fabricating DA7212 control names without hardware to verify them
-against would be actively wrong). `intercomd` never calls into the ALSA
+`alsactl restore -f /etc/codec-zero-intercom.state`.
+`scripts/codec-zero-mixer.sh` sets that routing up on the Pi, from
+control names checked against the DA7212 driver (docs/SMOKE_TESTS.md
+"S2"); `--store` then saves it to the state file. The state file itself
+isn't shipped in this repo -- it's captured from the live system, after
+fine-tuning levels there; see that unit's comments and `config/README.md`.
+`intercomd` never calls into the ALSA
 control API or shells out to a mixer CLI at runtime, full stop -- if a
 user-facing volume control is ever added, it must go through exactly one
 function, not calls scattered across whatever component happens to want
@@ -650,10 +659,11 @@ test (`architecture_invariants`) so it can't silently bit-rot:
 1. **No hardcoded ALSA card names in application code** (`grep` for a
    quoted `hw:`/`plughw:` in `src/`). All audio access goes through the
    named devices in `config/asound.conf` -- see "Named ALSA devices"
-   above. Eases the extension: swapping single-process `plug` aliases for
-   `dmix`/`dsnoop`/`route` (for concurrent per-station access once a
-   network-connected station needs the card at the same time as the local
-   ones) is then an `asound.conf`-only change.
+   above. This already paid off once: moving from single-process `plug`
+   aliases to shared `dsnoop`/`dmix` devices with one `route` per station
+   (two stations on one card) was an `asound.conf`-only change, and a
+   network-connected station needing the card next to the local ones
+   would be another.
 2. **No scattered mixer manipulation** (`grep` for `amixer`/`snd_mixer_`
    in `src/`). See "Centralized mixer state" above. Eases the extension:
    a hardware variant with a different routing story is a different state
@@ -729,7 +739,8 @@ genuinely runs on its background thread, not just eventually). Threaded
 tests there use a real background thread rather than faking one, since
 `post()`'s whole point is being safe to call across real threads.
 `icom_logger_tests` covers the logging registry, `configureLevels()`
-parsing, and the journal protocol writer (see "Logging" above). `icom_config_tests` covers `File` parsing
+parsing, and the journal protocol writer (see "Logging" above).
+`icom_config_tests` covers `File` parsing
 (including the missing-vs-malformed-file distinction) and
 `StationRegistry`'s defaults/overrides (see "Configuration" above).
 `icom_hw_tests` covers `StatusLed` -- on/off state tracking, and
@@ -755,31 +766,50 @@ its own handler. Moving the audio threads' creation before
 invariants"). `GpiodBackend` isn't in this `ctest` suite (host-dev builds
 without it entirely, see "GPIO abstraction") but is compile/link-tested
 under the `pi0-release`/`pi0-debug` presets, per that section. What's
-still not covered: real hardware verification of `GpiodBackend`, and
-`src/ipc`/`src/app` beyond logging and config (straightforward to add
-following the same pattern; left out of this pass to keep it to "one
-representative example per layer" per the scaffold's brief).
+still not covered: `GpiodBackend`'s hook-detect input on real hardware,
+unit tests for `src/ipc`'s protocol and server and for
+`Tcm1171Controller` (only exercised end to end, through
+`daemon_integration`), and the real sound card -- that's
+docs/SMOKE_TESTS.md, by hand on the Pi.
 
 ## What's next
 
 Roughly in the order it'd need doing to become a real intercom:
 
-1. Confirm TCM1171 pin wiring against the actual board (see "Pin
-   assignments"); fix polarity/line numbers.
-2. Pulse-dial decoding off the same hook-detect edges
-   `Tcm1171Controller` already timestamps.
+1. Finish the hardware check of the audio in `intercomd`
+   (docs/SMOKE_TESTS.md "Step 3", D1-D3), then store the tuned mixer
+   state for the boot-time restore (test 7, `codec-zero-mixer.sh
+   --store`) and run the daemon as the systemd service once, to confirm
+   `LimitRTPRIO` really gets the audio threads `SCHED_FIFO` (untested so
+   far: no warning in the journal, and `ps -L -o rtprio` shows 20).
+2. Confirm TCM1171 pin wiring against the actual board (see "Pin
+   assignments"), including how hook state reaches a GPIO; fix
+   polarity/line numbers and verify hook-detect edges on the Pi. Decide
+   too how the telephone's audio reaches the codec, i.e. whether the
+   handset becomes the inside station's mic and speaker in place of the
+   onboard mic and headphone jack -- a mixer-state and wiring change,
+   not a code change.
 3. Call state for the audio: mute the intercom while there's no call,
    plus ring and dial tones (a ring/tone generator for the TCM1171's ring
    cadence) -- the daemon runs the audio always-on today, see "Audio
-   boundary".
-4. Verify the per-channel routing in `config/asound.conf` (door = left,
-   inside = right) and the matching mixer state on the real hardware with
-   both stations connected (docs/SMOKE_TESTS.md "Step 2").
-5. Persist/report richer line state over the control protocol (e.g. call
+   boundary". Brings the first real message from the reactor to the
+   audio threads, and with it the lock-free queue.
+4. Pulse-dial decoding off the same hook-detect edges
+   `Tcm1171Controller` already timestamps.
+5. A recovery policy for the audio: today a route that dies (e.g. the
+   device going away) stays down until `intercomd` restarts, and the
+   daemon doesn't exit, so `Restart=on-failure` doesn't help. Retry with
+   a backoff, or exit and let systemd restart it -- the latter ties in
+   with item 7.
+6. Acoustic feedback, once both stations are mounted for real: an
+   always-open, full-duplex loop between two speaker/mic pairs can howl.
+   Levels and placement first; mute-while-not-in-a-call (item 3) and
+   half duplex are the software options if that isn't enough.
+7. `sd_notify()`/watchdog integration -- the audio dying (item 5) is the
+   first concrete failure mode worth detecting.
+8. Persist/report richer line state over the control protocol (e.g. call
    duration, last-ring time) once there's a client that wants it.
-6. `sd_notify()`/watchdog integration once there's a concrete failure mode
-   worth detecting.
-7. The network/third-station extension itself (a Mumble hub, or another
+9. The network/third-station extension itself (a Mumble hub, or another
    Pi) -- explicitly out of scope for this pass; see "Configuration" and
    "Architecture invariants" for what was done instead to make it
    possible without a rewrite.

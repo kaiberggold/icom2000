@@ -5,9 +5,10 @@ telephone wired through a TCM1171 SLIC, a Codec Zero HAT for audio, and a
 GPIO-driven door bell. Command-line only -- no GUI on the Pi -- controlled
 via a small Unix-socket protocol and a companion CLI (`intercomctl`).
 
-**Status: architecture scaffold, not a working intercom yet.** See
-[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for what's real, what's
-placeholder, and why the code is shaped the way it is.
+**Status: the door<->inside audio and the bell work; call state (muting,
+ring and dial tones), hook detection and pulse dialing don't exist yet.**
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for what's real, what's
+placeholder, what's next, and why the code is shaped the way it is.
 
 ## Requirements
 

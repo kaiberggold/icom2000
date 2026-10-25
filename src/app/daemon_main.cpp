@@ -155,7 +155,7 @@ int main(int argc, char** argv) {
     // fallback used when config/icom2000.conf's [gpio.*] sections are
     // absent, so they must stay in sync with that file.
     //
-    // GPIO23/24/27 are NOT free to assign here: the HiFiBerry Codec Zero
+    // GPIO23/24/27 are NOT free to assign here: the Raspberry Pi Codec Zero
     // HAT's own spec reserves them for its optional onboard status LEDs
     // (green=23, red=24) and tactile button (27) -- they're physically
     // wired on the HAT itself, not a software choice. ringModeLine/
