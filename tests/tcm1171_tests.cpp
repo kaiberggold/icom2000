@@ -1,6 +1,7 @@
 // Covers icom::hw::Tcm1171Controller against the mock GPIO backend: the
 // optional line mute (absent by default, see config/icom2000.conf's
-// [gpio.tcm1171] mute_line), and the hook-edge state changes it has to
+// [gpio.tcm1171] mute_line), active high or low (mute_active), and the
+// hook-edge state changes it has to
 // stay independent of. Edges go through a real EventLoop, the same path
 // the controller takes in intercomd.
 #include "check.hpp"
@@ -26,8 +27,10 @@ namespace
         std::unique_ptr<hw::Tcm1171Controller> controller;
 
         // `muteInitial` is what the backend starts the mute pin at, to show
-        // the controller itself drives it to unmuted.
-        explicit Line(bool withMute, gpio::Level muteInitial = gpio::Level::LOW)
+        // the controller itself drives it to unmuted; `muteActive` the
+        // level that means muted.
+        explicit Line(bool withMute, gpio::Level muteInitial = gpio::Level::LOW,
+                      gpio::Level muteActive = gpio::Level::HIGH)
         {
             hw::Tcm1171Controller::Pins pins
             {
@@ -36,6 +39,7 @@ namespace
                 backend.requestInput(gpio::PinConfig{"mockchip0", 6, "test-hook"}, gpio::Edge::BOTH),
                 withMute ? backend.requestOutput(gpio::PinConfig{"mockchip0", 26, "test-mute"}, muteInitial)
                     : nullptr,
+                      muteActive,
                 };
             ringMode = pins.ringMode.get();
             mute = pins.mute.get();
@@ -83,6 +87,22 @@ namespace
         CHECK(line.mute->drivenLevel() == gpio::Level::LOW);
     }
 
+    void testActiveLowMuteDrivesThePinInverted()
+    {
+        Line line(/*withMute=*/true, gpio::Level::LOW, /*muteActive=*/gpio::Level::LOW);
+
+        CHECK(!line.controller->isMuted());
+        CHECK(line.mute->drivenLevel() == gpio::Level::HIGH);
+
+        CHECK(line.controller->setMuted(true));
+        CHECK(line.controller->isMuted());
+        CHECK(line.mute->drivenLevel() == gpio::Level::LOW);
+
+        CHECK(line.controller->setMuted(false));
+        CHECK(!line.controller->isMuted());
+        CHECK(line.mute->drivenLevel() == gpio::Level::HIGH);
+    }
+
     void testMuteIsIndependentOfLineState()
     {
         Line line(/*withMute=*/true);
@@ -125,6 +145,7 @@ int main()
 {
     testWithoutMuteLineMuteIsUnavailable();
     testMuteStartsUnmutedAndDrivesThePin();
+    testActiveLowMuteDrivesThePinInverted();
     testMuteIsIndependentOfLineState();
     testAnsweringWhileRingingStopsRinging();
 

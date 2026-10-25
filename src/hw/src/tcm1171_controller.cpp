@@ -9,6 +9,11 @@ namespace icom::hw
     namespace
     {
         core::Logger& log = core::getLogger("hw.tcm1171");
+
+        gpio::Level inactive(gpio::Level active)
+        {
+            return active == gpio::Level::HIGH ? gpio::Level::LOW : gpio::Level::HIGH;
+        }
     } // namespace
 
     const char* toString(LineState state)
@@ -30,7 +35,7 @@ namespace icom::hw
         pins_.polarity->write(gpio::Level::LOW);
         if (pins_.mute)
         {
-            pins_.mute->write(gpio::Level::LOW);
+            pins_.mute->write(inactive(pins_.muteActive));
         }
 
         const int fd = pins_.hookDetect->eventFd();
@@ -76,7 +81,7 @@ namespace icom::hw
 
     bool Tcm1171Controller::isMuted() const
     {
-        return pins_.mute && pins_.mute->drivenLevel() == gpio::Level::HIGH;
+        return pins_.mute && pins_.mute->drivenLevel() == pins_.muteActive;
     }
 
     bool Tcm1171Controller::setMuted(bool muted)
@@ -88,7 +93,7 @@ namespace icom::hw
         }
         if (muted != isMuted())
         {
-            pins_.mute->write(muted ? gpio::Level::HIGH : gpio::Level::LOW);
+            pins_.mute->write(muted ? pins_.muteActive : inactive(pins_.muteActive));
             log.info(muted ? "line muted" : "line unmuted");
         }
         return true;

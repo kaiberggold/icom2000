@@ -333,9 +333,10 @@ libgpiod headers to exist.
   registers the input's edge fd with the `EventLoop` in its constructor,
   and exposes `LineState` (`OnHook`/`Ringing`/`OffHook`/`Fault`) plus
   `startRinging()`/`stopRinging()`. A third, optional output is the line
-  mute (`setMuted()`/`isMuted()`, High = muted): only there when
-  `[gpio.tcm1171] mute_line` is set -- unset in the shipped config --
-  and independent of the line state; `hasMute()` says which.
+  mute (`setMuted()`/`isMuted()`): only there when `[gpio.tcm1171]
+  mute_line` is set -- unset in the shipped config -- and independent of
+  the line state; `hasMute()` says which. `mute_active` (`high`, the
+  default, or `low`) is the level that mutes.
 - **`StatusLed`** drives the Codec Zero HAT's own onboard green status LED
   (GPIO23 -- see "Pin assignments" below for why that specific line).
   `blinkNTimes()` is its one interesting method: schedules `n` on/off
@@ -754,7 +755,8 @@ actively-running loop). `icom_pwm_tests` covers `Pwm` the same way:
 construction/`setDutyTime()` clamping, and that 0%/100%/partial duty
 actually produce the expected pin behavior over a real background loop.
 `icom_tcm1171_tests` covers `Tcm1171Controller`'s line mute -- not there
-without a mute pin, starts unmuted, drives the pin, and stays as set
+without a mute pin, starts unmuted, drives the pin (active high and
+active low), and stays as set
 through hook edges and ringing -- and that answering while ringing drops
 RM.
 `icom_audio_tests` covers the ALSA engine with no sound card, via
@@ -767,7 +769,8 @@ it) drives the real `intercomd` and `intercomctl` against the same kind
 of stand-in devices: `STATUS` says `audio=up` and each station's speaker
 gets exactly the other's mic; without devices `STATUS` says `audio=down`
 and the bell still works; the line mute is `unconfigured` with the
-shipped config (`LINE MUTE ON` fails) and works once `mute_line` is set;
+shipped config (`LINE MUTE ON` fails) and works once `mute_line` is set,
+and an invalid `mute_active` stops it at startup;
 and every time SIGTERM shuts it down through its own handler. Moving the audio threads' creation before
 `SignalWatcher` makes it fail (the process then dies from the signal).
 `architecture_invariants` just runs

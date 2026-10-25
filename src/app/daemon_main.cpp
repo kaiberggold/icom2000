@@ -168,6 +168,7 @@ int main(int argc, char** argv) {
     // Unset (the default): no mute line wired, LINE MUTE ON/OFF fails and
     // STATUS reports mute=unconfigured.
     std::optional<unsigned> muteLine;
+    Level muteActive = Level::HIGH; // the mute line's level for "muted"
     unsigned statusLedLine = 23; // Codec Zero's own green status LED
     unsigned statusLedBlinkOnMs = 50;
     unsigned statusLedBlinkOffMs = 50;
@@ -187,6 +188,12 @@ int main(int argc, char** argv) {
         hookDetectLine = config.getUint("gpio.tcm1171", "hook_detect_line", hookDetectLine);
         if (!config.get("gpio.tcm1171", "mute_line", "").empty()) {
             muteLine = config.getUint("gpio.tcm1171", "mute_line", 0);
+        }
+        const std::string muteActiveName = toUpper(config.get("gpio.tcm1171", "mute_active", "high"));
+        if (muteActiveName == "LOW") {
+            muteActive = Level::LOW;
+        } else if (muteActiveName != "HIGH") {
+            throw std::invalid_argument("mute_active must be high or low");
         }
         statusLedLine = config.getUint("gpio.status_led", "line", statusLedLine);
         statusLedBlinkOnMs = config.getUint("gpio.status_led", "blink_on_ms", statusLedBlinkOnMs);
@@ -222,7 +229,8 @@ int main(int argc, char** argv) {
 
     log.info("starting (socket=" + socketPath + ", gpio-chip=" + gpioChip +
              ", config=" + opts.configPath + ")");
-    log.info(muteLine ? "line mute: gpio line " + std::to_string(*muteLine)
+    log.info(muteLine ? "line mute: gpio line " + std::to_string(*muteLine) + ", active " +
+             (muteActive == Level::HIGH ? "high" : "low")
              : std::string("line mute: not configured"));
 
     EventLoop loop;
@@ -266,9 +274,11 @@ int main(int argc, char** argv) {
         Level::LOW),
         gpioBackend->requestInput(PinConfig{gpioChip, hookDetectLine, "icom2000-tcm1171-hook"},
         Edge::BOTH),
+        // Requested at the unmuted level, so it never glitches to muted.
         muteLine ? gpioBackend->requestOutput(PinConfig{gpioChip, *muteLine, "icom2000-tcm1171-mute"},
-        Level::LOW)
+        muteActive == Level::HIGH ? Level::LOW : Level::HIGH)
         : nullptr,
+        muteActive,
     },
     loop);
 

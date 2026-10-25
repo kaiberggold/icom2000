@@ -11,7 +11,8 @@
 #  - without them: STATUS says audio=down, the bell still works, and it
 #    shuts down cleanly;
 #  - the line mute: unconfigured with the shipped config (LINE MUTE ON
-#    fails), and working once [gpio.tcm1171] mute_line is set.
+#    fails), working once [gpio.tcm1171] mute_line is set, and an invalid
+#    mute_active stopping intercomd at startup.
 #
 # The stand-in devices are alsa-lib `file` PCMs in a scratch HOME's
 # .asoundrc, capture fed from FIFOs -- see tests/alsa_engine_tests.cpp for
@@ -136,12 +137,30 @@ def run(scratch, with_devices, with_mute):
         print("--- intercomd output:\n" + output)
 
 
+def invalid_mute_active(scratch):
+    text = open(CONFIG).read()
+    check("\n#mute_active = high\n" in text, "the shipped config leaves mute_active at its default")
+    config = os.path.join(scratch, "icom2000.conf")
+    with open(config, "w") as f:
+        f.write(text.replace("\n#mute_active = high\n", "\nmute_active = sideways\n"))
+    result = subprocess.run([INTERCOMD, "--config", config, "--socket", os.path.join(scratch, "icom.sock")],
+                            capture_output=True, text=True, timeout=5)
+    check(result.returncode == 1 and "mute_active must be high or low" in result.stderr,
+          f"invalid mute_active: intercomd refuses to start ({result.returncode}, {result.stderr.strip()!r})")
+
+
 for with_devices, with_mute in ((True, False), (False, False), (False, True)):
     scratch = tempfile.mkdtemp(prefix="icom_daemon_test_")
     try:
         run(scratch, with_devices, with_mute)
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
+
+scratch = tempfile.mkdtemp(prefix="icom_daemon_test_")
+try:
+    invalid_mute_active(scratch)
+finally:
+    shutil.rmtree(scratch, ignore_errors=True)
 
 if failures:
     print(f"{len(failures)} check(s) failed")

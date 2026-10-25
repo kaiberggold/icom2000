@@ -37,10 +37,13 @@ public:
         std::unique_ptr<gpio::IOutputPin> ringMode;    // RM: enable ring generation on the line
         std::unique_ptr<gpio::IOutputPin> polarity;     // FR: forward/reverse line polarity
         std::unique_ptr<gpio::IInputPin> hookDetect;   // external loop-current comparator output
-        // Optional: mutes the line's audio when High, e.g. a mute input on
-        // the SLIC board or an analog switch in its audio path. nullptr
-        // when none is wired ([gpio.tcm1171] mute_line unset).
+        // Optional: mutes the line's audio, e.g. a mute input on the SLIC
+        // board or an analog switch in its audio path. nullptr when none
+        // is wired ([gpio.tcm1171] mute_line unset).
         std::unique_ptr<gpio::IOutputPin> mute;
+        // The level on `mute` that means muted ([gpio.tcm1171]
+        // mute_active); unmuted is the other one.
+        gpio::Level muteActive = gpio::Level::HIGH;
     };
 
     using StateChangeCallback = std::function<void(LineState previous, LineState current)>;

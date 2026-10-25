@@ -402,8 +402,9 @@ What the controller does today, so you know what to look for:
   until this step confirms them: `ring_mode_line` (RM, output, default 5),
   `polarity_line` (F/R, output, default 22), `hook_detect_line` (input,
   default 6, edges in both directions). The commands below use the
-  defaults; substitute yours. A fourth, `mute_line` (output, High =
-  muted), is optional and unset by default -- see L7.
+  defaults; substitute yours. A fourth, `mute_line` (output; `mute_active`
+  sets whether High or Low mutes), is optional and unset by default -- see
+  L7.
 - At startup both outputs go low and the state is `on-hook`, whatever the
   hook line says. A rising edge means `off-hook`, a falling edge `on-hook`
   -- a guess at the polarity, which L2 checks. There's no debouncing.
@@ -565,12 +566,13 @@ startup -- a known gap, worth knowing about when reading the results.
 ### L7. Line mute (optional)
 
 Only if a mute line is wired -- a GPIO that mutes the telephone line's
-audio when High. Without one, skip this: `status` reports
+audio. Without one, skip this: `status` reports
 `mute=unconfigured` and `line mute on` answers `ERR line mute not
 configured`.
 
 Set `mute_line` in `[gpio.tcm1171]` in `config/icom2000.conf` (it ships
-commented out, as `#mute_line = 26`), sync it to the Pi
+commented out, as `#mute_line = 26`), and `mute_active = low` if the mute
+input is active low (the default is `high`); sync it to the Pi
 (`scripts/sync-config.sh`) and restart `intercomd`. Then, talking through
 the handset:
 
@@ -580,12 +582,12 @@ the handset:
 ./intercomctl -s /tmp/icom.sock line mute off     # OK off
 ```
 
-**Pass:** the log shows `line mute: gpio line 26` at startup and `line
+**Pass:** the log shows `line mute: gpio line 26, active high` (or `low`)
+at startup and `line
 muted`/`line unmuted` (component `hw.tcm1171`); `gpioinfo -c gpiochip0
 26` lists `icom2000-tcm1171-mute`; and the line's audio goes quiet
-between `on` and `off`. If it's quiet the other way round, the mute input
-is active low -- the controller drives High for muted, so that needs an
-inverter or a code change. Lifting and hanging up doesn't change the mute.
+between `on` and `off`. If it's quiet the other way round, flip
+`mute_active`. Lifting and hanging up doesn't change the mute.
 
 ## Troubleshooting: leftover shared memory
 
