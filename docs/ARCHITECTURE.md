@@ -332,7 +332,10 @@ libgpiod headers to exist.
   pins (ring-mode enable, line polarity) and one input pin (hook detect),
   registers the input's edge fd with the `EventLoop` in its constructor,
   and exposes `LineState` (`OnHook`/`Ringing`/`OffHook`/`Fault`) plus
-  `startRinging()`/`stopRinging()`.
+  `startRinging()`/`stopRinging()`. A third, optional output is the line
+  mute (`setMuted()`/`isMuted()`, High = muted): only there when
+  `[gpio.tcm1171] mute_line` is set -- unset in the shipped config --
+  and independent of the line state; `hasMute()` says which.
 - **`StatusLed`** drives the Codec Zero HAT's own onboard green status LED
   (GPIO23 -- see "Pin assignments" below for why that specific line).
   `blinkNTimes()` is its one interesting method: schedules `n` on/off
@@ -702,11 +705,12 @@ response:  "OK [message]\n"   or   "ERR <message>\n"
 
 Commands are registered by name (`registerCommand()`) rather than
 switched on inside `ControlServer` -- `daemon_main.cpp` is the only place
-that knows `BELL`, `LINE`, `STATUS`, and `PING` exist. Adding a command
+that knows `BELL`, `LINE` (`STATUS`, `MUTE [ON|OFF]`), `STATUS`, and
+`PING` exist. Adding a command
 later means adding a `registerCommand()` call at the wiring site, not
 touching `src/ipc` at all. Command names are matched case-insensitively;
 so are the keyword arguments the currently-registered handlers use (`ON`/
-`OFF`/`RING`, `STATUS`) -- each handler is responsible for its own
+`OFF`/`RING`, `STATUS`, `MUTE`) -- each handler is responsible for its own
 argument casing, `ControlServer` only normalizes the command name.
 
 `intercomctl` (`src/cli/ctl_main.cpp`) is a deliberately dumb client: it
@@ -731,7 +735,7 @@ third-party framework (Catch2/doctest/GTest) via `FetchContent`, so
 is a ~20-line `CHECK()` macro. Swapping in a real framework later is a
 one-file change once the suite outgrows that.
 
-Eight `ctest` cases: `icom_tests` covers `MockBackend` output/input
+Nine `ctest` cases: `icom_tests` covers `MockBackend` output/input
 behavior, that an injected mock edge reaches an `EventLoop` callback
 end-to-end (the same path `Tcm1171Controller` depends on in production),
 `EventLoop::post()`, and `LoopThread` (confirming a posted callback
@@ -749,6 +753,10 @@ just realism: see "Software PWM" for why `~StatusLed()` requires an
 actively-running loop). `icom_pwm_tests` covers `Pwm` the same way:
 construction/`setDutyTime()` clamping, and that 0%/100%/partial duty
 actually produce the expected pin behavior over a real background loop.
+`icom_tcm1171_tests` covers `Tcm1171Controller`'s line mute -- not there
+without a mute pin, starts unmuted, drives the pin, and stays as set
+through hook edges and ringing -- and that answering while ringing drops
+RM.
 `icom_audio_tests` covers the ALSA engine with no sound card, via
 file-backed test PCMs: bad device names leave it stopped, a known sample
 pattern arrives bit-exact at playback -- for one route and for the
@@ -758,8 +766,9 @@ nothing (see "Audio boundary"). `daemon_integration`
 it) drives the real `intercomd` and `intercomctl` against the same kind
 of stand-in devices: `STATUS` says `audio=up` and each station's speaker
 gets exactly the other's mic; without devices `STATUS` says `audio=down`
-and the bell still works; and both times SIGTERM shuts it down through
-its own handler. Moving the audio threads' creation before
+and the bell still works; the line mute is `unconfigured` with the
+shipped config (`LINE MUTE ON` fails) and works once `mute_line` is set;
+and every time SIGTERM shuts it down through its own handler. Moving the audio threads' creation before
 `SignalWatcher` makes it fail (the process then dies from the signal).
 `architecture_invariants` just runs
 `scripts/check_architecture_invariants.sh` (see "Architecture
@@ -767,9 +776,8 @@ invariants"). `GpiodBackend` isn't in this `ctest` suite (host-dev builds
 without it entirely, see "GPIO abstraction") but is compile/link-tested
 under the `pi0-release`/`pi0-debug` presets, per that section. What's
 still not covered: `GpiodBackend`'s hook-detect input on real hardware,
-unit tests for `src/ipc`'s protocol and server and for
-`Tcm1171Controller` (only exercised end to end, through
-`daemon_integration`), and the real sound card -- that's
+unit tests for `src/ipc`'s protocol and server (only exercised end to
+end, through `daemon_integration`), and the real sound card -- that's
 docs/SMOKE_TESTS.md, by hand on the Pi.
 
 ## What's next

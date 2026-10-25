@@ -9,7 +9,9 @@
 #    the signals, since one of them would then take the SIGTERM and kill
 #    the process (exit -15);
 #  - without them: STATUS says audio=down, the bell still works, and it
-#    shuts down cleanly.
+#    shuts down cleanly;
+#  - the line mute: unconfigured with the shipped config (LINE MUTE ON
+#    fails), and working once [gpio.tcm1171] mute_line is set.
 #
 # The stand-in devices are alsa-lib `file` PCMs in a scratch HOME's
 # .asoundrc, capture fed from FIFOs -- see tests/alsa_engine_tests.cpp for
@@ -48,8 +50,16 @@ def played_exactly(path, pattern):
     return list(samples[first:first + len(pattern)]) == pattern
 
 
-def run(scratch, with_devices):
-    label = "with devices" if with_devices else "without devices"
+def run(scratch, with_devices, with_mute):
+    label = ("with devices" if with_devices else "without devices") + (", mute line" if with_mute else "")
+    config = CONFIG
+    if with_mute:
+        # The shipped config's own commented-out example, switched on.
+        text = open(CONFIG).read()
+        check("\n#mute_line = 26\n" in text, f"{label}: the shipped config leaves mute_line unset")
+        config = os.path.join(scratch, "icom2000.conf")
+        with open(config, "w") as f:
+            f.write(text.replace("\n#mute_line = 26\n", "\nmute_line = 26\n"))
     home = os.path.join(scratch, "home")
     os.makedirs(home, exist_ok=True)
     asoundrc = ""
@@ -75,7 +85,7 @@ def run(scratch, with_devices):
     env.pop("XDG_CONFIG_HOME", None)
     env.pop("ICOM_LOG", None)
     daemon = subprocess.Popen(
-        [INTERCOMD, "--config", CONFIG, "--socket", sock, "--log-console", "--log-level", "info"],
+        [INTERCOMD, "--config", config, "--socket", sock, "--log-console", "--log-level", "info"],
         env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
 
     def ctl(*args):
@@ -90,6 +100,16 @@ def run(scratch, with_devices):
     status = ctl("status")
     check(f"audio={'up' if with_devices else 'down'}" in status, f"{label}: STATUS reports {status!r}")
     check("ringing" in ctl("bell", "ring", "50"), f"{label}: the bell still works")
+    if with_mute:
+        check("mute=off" in status, f"{label}: the line starts unmuted")
+        check(ctl("line", "mute", "on") == "OK on", f"{label}: LINE MUTE ON mutes")
+        check("mute=on" in ctl("status"), f"{label}: STATUS reports mute=on")
+        check(ctl("line", "mute") == "OK on", f"{label}: LINE MUTE reports it")
+        check(ctl("line", "mute", "off") == "OK off", f"{label}: LINE MUTE OFF unmutes")
+    else:
+        check("mute=unconfigured" in status, f"{label}: STATUS reports mute=unconfigured")
+        check(ctl("line", "mute", "on").startswith("ERR"), f"{label}: LINE MUTE ON fails")
+        check(ctl("line", "mute") == "OK unconfigured", f"{label}: LINE MUTE reports unconfigured")
 
     daemon.send_signal(signal.SIGTERM)
     # The audio threads are blocked reading the empty FIFOs; closing them
@@ -116,10 +136,10 @@ def run(scratch, with_devices):
         print("--- intercomd output:\n" + output)
 
 
-for with_devices in (True, False):
+for with_devices, with_mute in ((True, False), (False, False), (False, True)):
     scratch = tempfile.mkdtemp(prefix="icom_daemon_test_")
     try:
-        run(scratch, with_devices)
+        run(scratch, with_devices, with_mute)
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
 

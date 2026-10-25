@@ -4,7 +4,7 @@ Manual bring-up checks for the audio hardware and the daemon's audio, to
 run on the Pi (see docs/ARCHITECTURE.md "Audio boundary"), and for the
 telephone line (Step 4). Ordered so each test only relies on what the
 previous ones proved. Tests 0-7 and S1-S5 use the standard ALSA tools
-(`alsa-utils`), S6 our engine on its own, D1-D3 the daemon itself. L1-L6
+(`alsa-utils`), S6 our engine on its own, D1-D3 the daemon itself. L1-L7
 check the TCM1171 and its GPIO lines, with the libgpiod tools and then
 the daemon.
 
@@ -402,14 +402,16 @@ What the controller does today, so you know what to look for:
   until this step confirms them: `ring_mode_line` (RM, output, default 5),
   `polarity_line` (F/R, output, default 22), `hook_detect_line` (input,
   default 6, edges in both directions). The commands below use the
-  defaults; substitute yours.
+  defaults; substitute yours. A fourth, `mute_line` (output, High =
+  muted), is optional and unset by default -- see L7.
 - At startup both outputs go low and the state is `on-hook`, whatever the
   hook line says. A rising edge means `off-hook`, a falling edge `on-hook`
   -- a guess at the polarity, which L2 checks. There's no debouncing.
 - Ringing only sets RM high, nothing else; F/R stays low. And nothing
-  calls it yet: `intercomctl` can only read the line state (`line
-  status`, and `line=` in `status`). So L3-L5 drive the SLIC directly with
-  the libgpiod tools, and only L6 is the daemon itself.
+  calls it yet: `intercomctl` can read the line state (`line status`, and
+  `line=` in `status`) and set the optional mute, but not ring. So L3-L5
+  drive the SLIC directly with the libgpiod tools, and only L6 and L7 are
+  the daemon itself.
 
 **Stop `intercomd` for L1-L5.** It holds its three lines while it runs,
 so the tools fail with "Device or resource busy". The other way round, an
@@ -560,6 +562,31 @@ the handset already lifted: `line status` then says `on-hook` until the
 next edge, because the controller doesn't read the line's level at
 startup -- a known gap, worth knowing about when reading the results.
 
+### L7. Line mute (optional)
+
+Only if a mute line is wired -- a GPIO that mutes the telephone line's
+audio when High. Without one, skip this: `status` reports
+`mute=unconfigured` and `line mute on` answers `ERR line mute not
+configured`.
+
+Set `mute_line` in `[gpio.tcm1171]` in `config/icom2000.conf` (it ships
+commented out, as `#mute_line = 26`), sync it to the Pi
+(`scripts/sync-config.sh`) and restart `intercomd`. Then, talking through
+the handset:
+
+```sh
+./intercomctl -s /tmp/icom.sock status            # ... mute=off ...
+./intercomctl -s /tmp/icom.sock line mute on      # OK on
+./intercomctl -s /tmp/icom.sock line mute off     # OK off
+```
+
+**Pass:** the log shows `line mute: gpio line 26` at startup and `line
+muted`/`line unmuted` (component `hw.tcm1171`); `gpioinfo -c gpiochip0
+26` lists `icom2000-tcm1171-mute`; and the line's audio goes quiet
+between `on` and `off`. If it's quiet the other way round, the mute input
+is active low -- the controller drives High for muted, so that needs an
+inverter or a code change. Lifting and hanging up doesn't change the mute.
+
 ## Troubleshooting: leftover shared memory
 
 The shared devices (`dsnoop`/`dmix`) keep their state in System V shared
@@ -607,6 +634,7 @@ still belongs to a running program.
 | L4. Ringing | | | |
 | L5. Ring trip | | | |
 | L6. intercomd sees the hook | | | |
+| L7. Line mute (optional) | | | |
 
 ## Not covered yet
 

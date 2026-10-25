@@ -45,9 +45,9 @@ using namespace std::chrono_literals;
 namespace {
 
 // Command *names* are matched case-insensitively by ControlServer itself;
-// this covers the keyword *arguments* (BELL's ON/OFF/RING, LINE's STATUS)
-// so `intercomctl bell ring` works as naturally from a shell as
-// `intercomctl BELL RING` does.
+// this covers the keyword *arguments* (BELL's ON/OFF/RING, LINE's
+// STATUS/MUTE ON/OFF) so `intercomctl bell ring` works as naturally from a
+// shell as `intercomctl BELL RING` does.
 std::string toUpper(std::string s) {
     std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return std::toupper(c); });
     return s;
@@ -165,6 +165,9 @@ int main(int argc, char** argv) {
     unsigned ringModeLine = 5;
     unsigned polarityLine = 22;
     unsigned hookDetectLine = 6;
+    // Unset (the default): no mute line wired, LINE MUTE ON/OFF fails and
+    // STATUS reports mute=unconfigured.
+    std::optional<unsigned> muteLine;
     unsigned statusLedLine = 23; // Codec Zero's own green status LED
     unsigned statusLedBlinkOnMs = 50;
     unsigned statusLedBlinkOffMs = 50;
@@ -182,6 +185,9 @@ int main(int argc, char** argv) {
         ringModeLine = config.getUint("gpio.tcm1171", "ring_mode_line", ringModeLine);
         polarityLine = config.getUint("gpio.tcm1171", "polarity_line", polarityLine);
         hookDetectLine = config.getUint("gpio.tcm1171", "hook_detect_line", hookDetectLine);
+        if (!config.get("gpio.tcm1171", "mute_line", "").empty()) {
+            muteLine = config.getUint("gpio.tcm1171", "mute_line", 0);
+        }
         statusLedLine = config.getUint("gpio.status_led", "line", statusLedLine);
         statusLedBlinkOnMs = config.getUint("gpio.status_led", "blink_on_ms", statusLedBlinkOnMs);
         statusLedBlinkOffMs = config.getUint("gpio.status_led", "blink_off_ms", statusLedBlinkOffMs);
@@ -216,6 +222,8 @@ int main(int argc, char** argv) {
 
     log.info("starting (socket=" + socketPath + ", gpio-chip=" + gpioChip +
              ", config=" + opts.configPath + ")");
+    log.info(muteLine ? "line mute: gpio line " + std::to_string(*muteLine)
+             : std::string("line mute: not configured"));
 
     EventLoop loop;
 
@@ -258,6 +266,9 @@ int main(int argc, char** argv) {
         Level::LOW),
         gpioBackend->requestInput(PinConfig{gpioChip, hookDetectLine, "icom2000-tcm1171-hook"},
         Edge::BOTH),
+        muteLine ? gpioBackend->requestOutput(PinConfig{gpioChip, *muteLine, "icom2000-tcm1171-mute"},
+        Level::LOW)
+        : nullptr,
     },
     loop);
 
@@ -302,15 +313,33 @@ int main(int argc, char** argv) {
         return CommandResult::success(bell.isRinging() ? "ringing" : "silent");
     });
 
+    const auto muteState = [&line] {
+        return !line.hasMute() ? "unconfigured" : line.isMuted() ? "on" : "off";
+    };
+
     server.registerCommand("LINE", [&](const std::vector<std::string>& args) {
-        if (args.empty() || toUpper(args[0]) != "STATUS") {
-            return CommandResult::failure("usage: LINE STATUS");
+        const std::string sub = args.empty() ? "" : toUpper(args[0]);
+        if (sub == "STATUS") {
+            return CommandResult::success(icom::hw::toString(line.state()));
         }
-        return CommandResult::success(icom::hw::toString(line.state()));
+        if (sub == "MUTE" && args.size() <= 2) {
+            if (args.size() == 2) {
+                const std::string value = toUpper(args[1]);
+                if (value != "ON" && value != "OFF") {
+                    return CommandResult::failure("usage: LINE MUTE [ON|OFF]");
+                }
+                if (!line.setMuted(value == "ON")) {
+                    return CommandResult::failure("line mute not configured (mute_line in [gpio.tcm1171])");
+                }
+            }
+            return CommandResult::success(muteState());
+        }
+        return CommandResult::failure("usage: LINE STATUS | LINE MUTE [ON|OFF]");
     });
 
     server.registerCommand("STATUS", [&](const auto&) {
         return CommandResult::success(std::string("line=") + icom::hw::toString(line.state()) +
+                                      " mute=" + muteState() +
                                       " bell=" + (bell.isRinging() ? "ringing" : "silent") +
                                       " audio=" + (audioUp() ? "up" : "down"));
     });

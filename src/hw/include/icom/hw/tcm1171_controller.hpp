@@ -37,6 +37,10 @@ public:
         std::unique_ptr<gpio::IOutputPin> ringMode;    // RM: enable ring generation on the line
         std::unique_ptr<gpio::IOutputPin> polarity;     // FR: forward/reverse line polarity
         std::unique_ptr<gpio::IInputPin> hookDetect;   // external loop-current comparator output
+        // Optional: mutes the line's audio when High, e.g. a mute input on
+        // the SLIC board or an analog switch in its audio path. nullptr
+        // when none is wired ([gpio.tcm1171] mute_line unset).
+        std::unique_ptr<gpio::IOutputPin> mute;
     };
 
     using StateChangeCallback = std::function<void(LineState previous, LineState current)>;
@@ -53,6 +57,13 @@ public:
     // but this must never be allowed to wedge the line.
     void startRinging();
     void stopRinging();
+
+    // Line mute, independent of the line state: starts unmuted, and stays
+    // as set until changed. Without a mute pin, isMuted() is always false
+    // and setMuted() changes nothing and returns false.
+    bool hasMute() const { return pins_.mute != nullptr; }
+    bool isMuted() const;
+    bool setMuted(bool muted);
 
 private:
     void setState(LineState next);

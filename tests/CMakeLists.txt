@@ -33,6 +33,13 @@ target_link_libraries(icom_pwm_tests PRIVATE icom::core icom::gpio icom::hw icom
 
 add_test(NAME icom_pwm_tests COMMAND icom_pwm_tests)
 
+add_executable(icom_tcm1171_tests
+    tcm1171_tests.cpp
+)
+target_link_libraries(icom_tcm1171_tests PRIVATE icom::core icom::gpio icom::hw icom::warnings)
+
+add_test(NAME icom_tcm1171_tests COMMAND icom_tcm1171_tests)
+
 add_executable(icom_audio_tests
     alsa_engine_tests.cpp
 )

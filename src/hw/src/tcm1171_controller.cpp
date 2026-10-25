@@ -28,6 +28,10 @@ namespace icom::hw
     {
         pins_.ringMode->write(gpio::Level::LOW);
         pins_.polarity->write(gpio::Level::LOW);
+        if (pins_.mute)
+        {
+            pins_.mute->write(gpio::Level::LOW);
+        }
 
         const int fd = pins_.hookDetect->eventFd();
         if (fd >= 0)
@@ -68,6 +72,26 @@ namespace icom::hw
         }
         pins_.ringMode->write(gpio::Level::LOW);
         setState(LineState::ON_HOOK);
+    }
+
+    bool Tcm1171Controller::isMuted() const
+    {
+        return pins_.mute && pins_.mute->drivenLevel() == gpio::Level::HIGH;
+    }
+
+    bool Tcm1171Controller::setMuted(bool muted)
+    {
+        if (!pins_.mute)
+        {
+            log.warn("no mute line configured; ignoring mute request");
+            return false;
+        }
+        if (muted != isMuted())
+        {
+            pins_.mute->write(muted ? gpio::Level::HIGH : gpio::Level::LOW);
+            log.info(muted ? "line muted" : "line unmuted");
+        }
+        return true;
     }
 
     void Tcm1171Controller::setState(LineState next)

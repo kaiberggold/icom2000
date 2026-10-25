@@ -23,7 +23,8 @@ void printUsage(const char* argv0) {
               << ", overridable via ICOM2000_SOCKET)\n"
               << "examples:\n"
               << "  " << argv0 << " bell ring\n"
-              << "  " << argv0 << " line status\n";
+              << "  " << argv0 << " line status\n"
+              << "  " << argv0 << " line mute on\n";
 }
 
 } // namespace
