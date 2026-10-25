@@ -1,10 +1,12 @@
-# Audio smoke tests (Pi Zero + Codec Zero)
+# Smoke tests (Pi Zero + Codec Zero + TCM1171)
 
 Manual bring-up checks for the audio hardware and the daemon's audio, to
-run on the Pi (see docs/ARCHITECTURE.md "Audio boundary"). Ordered so
-each test only relies on what the previous ones proved. Tests 0-7 and
-S1-S5 use the standard ALSA tools (`alsa-utils`), S6 our engine on its
-own, D1-D3 the daemon itself.
+run on the Pi (see docs/ARCHITECTURE.md "Audio boundary"), and for the
+telephone line (Step 4). Ordered so each test only relies on what the
+previous ones proved. Tests 0-7 and S1-S5 use the standard ALSA tools
+(`alsa-utils`), S6 our engine on its own, D1-D3 the daemon itself. L1-L6
+check the TCM1171 and its GPIO lines, with the libgpiod tools and then
+the daemon.
 
 **Stop `intercomd` for tests 0-7 and S1-S6.** It runs the intercom from
 startup, and the shared devices let it use the card next to the test
@@ -387,6 +389,177 @@ threads stopped and the daemon exited on its own. A terminal that just
 says `Terminated`, without `stopped`, means the signal killed the process
 instead.
 
+## Step 4: TCM1171 line interface
+
+The telephone side: the TCM1171 SLIC and `Tcm1171Controller`
+(docs/ARCHITECTURE.md "Hardware layer", "Pin assignments"). Independent
+of the audio tests -- it needs only the SLIC wired to the Pi and the
+telephone on its line.
+
+What the controller does today, so you know what to look for:
+
+- Three lines from `[gpio.tcm1171]` in `/etc/icom2000.conf` -- placeholders
+  until this step confirms them: `ring_mode_line` (RM, output, default 5),
+  `polarity_line` (F/R, output, default 22), `hook_detect_line` (input,
+  default 6, edges in both directions). The commands below use the
+  defaults; substitute yours.
+- At startup both outputs go low and the state is `on-hook`, whatever the
+  hook line says. A rising edge means `off-hook`, a falling edge `on-hook`
+  -- a guess at the polarity, which L2 checks. There's no debouncing.
+- Ringing only sets RM high, nothing else; F/R stays low. And nothing
+  calls it yet: `intercomctl` can only read the line state (`line
+  status`, and `line=` in `status`). So L3-L5 drive the SLIC directly with
+  the libgpiod tools, and only L6 is the daemon itself.
+
+**Stop `intercomd` for L1-L5.** It holds its three lines while it runs,
+so the tools fail with "Device or resource busy". The other way round, an
+`intercomd` started while a `gpioset` still holds a line fails to start.
+
+**Safety:**
+
+- The ringing voltage on the telephone line is tens of volts AC, enough
+  for a shock. Don't touch the line wires or the SLIC's tip/ring pins
+  while anything drives RM high.
+- The Pi's GPIOs take 3.3 V at most and aren't 5 V tolerant. If the SLIC
+  runs from 5 V, measure its hook output (L2) before connecting it to the
+  Pi; a 5 V output needs a voltage divider or level shifter. Check in its
+  datasheet that 3.3 V from the Pi counts as high on RM and F/R.
+
+On the Pi:
+
+```sh
+sudo apt install gpiod    # gpioinfo, gpioget, gpioset, gpiomon (libgpiod v2 syntax below)
+```
+
+### L1. Lines free and as expected
+
+```sh
+gpioinfo -c gpiochip0 5 6 22
+pinctrl get 5,6,22        # Raspberry Pi OS: function, level and pull of each pin
+```
+
+**Pass:** no line is `used` by anything else (a consumer name means
+another driver or overlay owns it -- pick other lines in
+`[gpio.tcm1171]`). Note the pulls: on the Pi, GPIO0-8 default to a
+pull-up, so with nothing driving line 6 it reads high -- which the
+controller would take as off-hook.
+
+### L2. Hook signal
+
+First, with a multimeter between the SLIC's hook output and ground: note
+the voltage on hook and off hook. **Pass for wiring it to the Pi:** both
+at most 3.3 V, and clearly different. Then, on the Pi:
+
+```sh
+gpiomon -c gpiochip0 -e both 6
+```
+
+Lift the handset and hang up a few times, slowly. Then lift it and dial a
+digit on the rotary dial (e.g. a 3).
+
+**Pass:** each lift and each hang-up shows up, the same way every time.
+Record:
+
+- Which level means off-hook. The controller assumes high; if it's low,
+  that's the polarity fix in `Tcm1171Controller::onHookEdge()`.
+- How many edges one lift or hang-up gives -- more than one is contact
+  bounce, and with no debouncing the daemon would see several state
+  changes.
+- The dial: a dialed 3 should show 3 short pulses (roughly 60 ms
+  interrupted, 40 ms closed each, at 10 pulses per second). Note the
+  timestamps; pulse-dial decoding will need them.
+- If the line doesn't change at all, the output may be open-drain: try
+  `gpiomon -c gpiochip0 -b pull-up -e both 6`. If that works, the backend
+  will need to request the pull-up too (it requests no bias today).
+
+### L3. Line polarity (F/R)
+
+With the handset on hook, a multimeter on DC volts across the telephone's
+tip and ring wires:
+
+```sh
+gpioset -c gpiochip0 22=0     # note the voltage, then Ctrl-C
+gpioset -c gpiochip0 22=1     # note the voltage, then Ctrl-C
+```
+
+`gpioset` holds the value only while it runs.
+
+**Pass:** the same voltage (record it) with the sign flipped between the
+two.
+
+### L4. Ringing
+
+With the handset on hook. First RM on its own, as the controller does it
+(for a few seconds, then Ctrl-C):
+
+```sh
+gpioset -c gpiochip0 5=1
+```
+
+Then RM high with F/R toggling at the ring frequency, in two terminals:
+
+```sh
+gpioset -c gpiochip0 5=1                # terminal 1: RM high
+gpioset -c gpiochip0 -t 20ms 22=1       # terminal 2: F/R toggling every 20 ms = 25 Hz
+```
+
+25 Hz is the usual ring frequency in Germany; `-t 25ms` gives 20 Hz (the
+US one). Stop with Ctrl-C in terminal 2 first, then terminal 1.
+
+**Pass:** the telephone rings in one of the two cases. Record which one.
+On SLICs of the same kind (e.g. Silvertel's Ag1171) the ringing voltage
+comes from toggling F/R at the ring frequency while RM is high; if that's
+the variant that rings here, setting RM alone -- all
+`Tcm1171Controller::startRinging()` does today -- can't ring the bell,
+and the controller needs that toggle. Ringing as real telephones do it
+(e.g. 1 s on, 4 s off) is cadence on top of that, also still to do.
+
+### L5. Ring trip
+
+Ringing as in L4, the variant that rang, plus a third terminal:
+
+```sh
+gpiomon -c gpiochip0 -e both 6
+```
+
+Let it ring with the handset on hook for a few seconds, then lift the
+handset -- don't put it to your ear -- and stop ringing at once (Ctrl-C
+in terminals 2 and 1).
+
+**Pass:**
+
+- While it rings on hook, the hook line stays quiet. Edges there mean the
+  ringing current triggers the hook detection: the controller would read
+  that as off-hook and stop ringing at once.
+- Lifting the handset during ringing shows up as off-hook. That's what the
+  controller uses to stop ringing when someone answers.
+
+### L6. `intercomd` sees the hook
+
+With the handset on hook and all `gpioset`/`gpiomon` stopped, start
+`intercomd` as in D1, then:
+
+```sh
+./intercomctl -s /tmp/icom.sock line status
+```
+
+**Pass:**
+
+- The log shows `requested output gpiochip0:5 (icom2000-tcm1171-rm)`,
+  `requested output gpiochip0:22 (icom2000-tcm1171-fr)` and `requested
+  input gpiochip0:6 (icom2000-tcm1171-hook)`, and `gpioinfo -c gpiochip0
+  5 6 22` lists those consumers.
+- `line status` says `on-hook`.
+- Lifting the handset logs `on-hook -> off-hook` (component `hw.tcm1171`),
+  and `line status` says `off-hook`; hanging up logs `off-hook ->
+  on-hook`.
+
+Record if it's the wrong way round (the polarity from L2), or if one lift
+logs several changes (bounce from L2). Also try starting `intercomd` with
+the handset already lifted: `line status` then says `on-hook` until the
+next edge, because the controller doesn't read the line's level at
+startup -- a known gap, worth knowing about when reading the results.
+
 ## Troubleshooting: leftover shared memory
 
 The shared devices (`dsnoop`/`dmix`) keep their state in System V shared
@@ -428,9 +601,20 @@ still belongs to a running program.
 | D1. intercomd audio up | | | |
 | D2. Talk through intercomd | | | |
 | D3. Clean shutdown | | | |
+| L1. GPIO lines | | | |
+| L2. Hook signal | | | |
+| L3. Line polarity | | | |
+| L4. Ringing | | | |
+| L5. Ring trip | | | |
+| L6. intercomd sees the hook | | | |
 
 ## Not covered yet
 
 The audio runs always-on: there's no call state yet that mutes it while
 nobody's talking, and no ring or dial tones (docs/ARCHITECTURE.md "Audio
 boundary").
+
+On the telephone side: `intercomd` can't ring the telephone yet -- there's
+no command for it, and the controller's ringing may need more than RM
+(L4) -- and doesn't decode pulse dialing. The handset's audio (how the
+telephone's speech reaches the codec) isn't part of these tests either.

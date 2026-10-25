@@ -784,7 +784,10 @@ Roughly in the order it'd need doing to become a real intercom:
    far: no warning in the journal, and `ps -L -o rtprio` shows 20).
 2. Confirm TCM1171 pin wiring against the actual board (see "Pin
    assignments"), including how hook state reaches a GPIO; fix
-   polarity/line numbers and verify hook-detect edges on the Pi. Decide
+   polarity/line numbers and verify hook-detect edges on the Pi
+   (docs/SMOKE_TESTS.md "Step 4", L1-L6). L4 also shows whether ringing
+   needs F/R toggled at the ring frequency, not just RM high -- if so,
+   `startRinging()` needs that, plus a command to ring at all. Decide
    too how the telephone's audio reaches the codec, i.e. whether the
    handset becomes the inside station's mic and speaker in place of the
    onboard mic and headphone jack -- a mixer-state and wiring change,

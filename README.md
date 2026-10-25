@@ -74,9 +74,9 @@ one piece that isn't tracked here, the alsactl state file itself). After
 that, `scripts/deploy.sh user@pi-hostname` copies just the binaries over
 and restarts `intercomd` for every subsequent update.
 
-Bringing up the audio hardware: [`docs/SMOKE_TESTS.md`](docs/SMOKE_TESTS.md)
+Bringing up the hardware: [`docs/SMOKE_TESTS.md`](docs/SMOKE_TESTS.md)
 walks through speaker, microphone and mixer checks with the standard ALSA
-tools.
+tools, then the daemon's audio and the TCM1171 telephone line.
 
 ## VS Code (Windows + WSL2)
 
